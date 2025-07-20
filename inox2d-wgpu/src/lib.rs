@@ -1,9 +1,9 @@
 use glam::{Mat4, UVec2};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use inox2d::math::camera::Camera;
 use inox2d::model::Model;
 use inox2d::node::{
-    components::{Mask, Masks, TexturedMesh},
+    components::{Mask, Masks},
     drawables::{CompositeComponents, TexturedMeshComponents},
     InoxNodeUuid,
 };
@@ -64,8 +64,14 @@ pub struct WgpuRenderer {
     camera_buf: wgpu::Buffer,
     camera_bg: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     textures: Vec<wgpu::BindGroup>,
+    composite_texture: RefCell<Option<wgpu::Texture>>,
+    composite_view: RefCell<Option<wgpu::TextureView>>,
+    composite_bg: RefCell<Option<wgpu::BindGroup>>,
+    prev_target_view: Cell<*const wgpu::TextureView>,
     stencil_texture: wgpu::Texture,
     stencil_view: wgpu::TextureView,
     target_view: Cell<*const wgpu::TextureView>,
@@ -162,6 +168,27 @@ impl WgpuRenderer {
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("inox2d_texture_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
 
         let textures = decode_model_textures(model.textures.iter())
             .iter()
@@ -199,27 +226,7 @@ impl WgpuRenderer {
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("inox2d_texture_bind_group"),
-                    layout: &device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("inox2d_texture_layout"),
-                        entries: &[
-                            wgpu::BindGroupLayoutEntry {
-                                binding: 0,
-                                visibility: wgpu::ShaderStages::FRAGMENT,
-                                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                                count: None,
-                            },
-                            wgpu::BindGroupLayoutEntry {
-                                binding: 1,
-                                visibility: wgpu::ShaderStages::FRAGMENT,
-                                ty: wgpu::BindingType::Texture {
-                                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                    view_dimension: wgpu::TextureViewDimension::D2,
-                                    multisampled: false,
-                                },
-                                count: None,
-                            },
-                        ],
-                    }),
+                    layout: &texture_layout,
                     entries: &[
                         wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&sampler) },
                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
@@ -241,27 +248,7 @@ impl WgpuRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("inox2d_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout, &device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("inox2d_texture_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                ],
-            })],
+            bind_group_layouts: &[&bind_group_layout, &texture_layout],
             push_constant_ranges: &[],
         });
 
@@ -316,8 +303,14 @@ impl WgpuRenderer {
             camera_buf,
             camera_bg,
             bind_group_layout,
+            texture_layout,
+            sampler,
             pipeline,
             textures,
+            composite_texture: RefCell::new(None),
+            composite_view: RefCell::new(None),
+            composite_bg: RefCell::new(None),
+            prev_target_view: Cell::new(core::ptr::null()),
             stencil_texture,
             stencil_view,
             target_view: Cell::new(core::ptr::null()),
@@ -417,21 +410,105 @@ impl InoxRenderer for WgpuRenderer {
             self.queue.submit(Some(encoder.finish()));
         }
 
-	fn begin_composite_content(
-		&self,
-		_as_mask: bool,
-		_components: &CompositeComponents,
-		_render_ctx: &CompositeRenderCtx,
-		_id: InoxNodeUuid,
-	) {
-	}
+        fn begin_composite_content(
+                &self,
+                _as_mask: bool,
+                _components: &CompositeComponents,
+                _render_ctx: &CompositeRenderCtx,
+                _id: InoxNodeUuid,
+        ) {
+            let size = wgpu::Extent3d {
+                width: self.viewport.x.max(1),
+                height: self.viewport.y.max(1),
+                depth_or_array_layers: 1,
+            };
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("inox2d_composite"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("inox2d_composite_bg"),
+                layout: &self.texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                ],
+            });
+            *self.composite_texture.borrow_mut() = Some(texture);
+            *self.composite_view.borrow_mut() = Some(view);
+            *self.composite_bg.borrow_mut() = Some(bg);
+            self.prev_target_view.set(self.target_view.get());
+            self.target_view.set(self.composite_view.borrow().as_ref().unwrap() as *const _);
 
-	fn finish_composite_content(
-		&self,
-		_as_mask: bool,
-		_components: &CompositeComponents,
-		_render_ctx: &CompositeRenderCtx,
-		_id: InoxNodeUuid,
-	) {
-	}
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("inox2d_clear_composite") });
+            {
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("inox2d_clear_composite"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: self.composite_view.borrow().as_ref().unwrap(),
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+
+        fn finish_composite_content(
+                &self,
+                _as_mask: bool,
+                _components: &CompositeComponents,
+                _render_ctx: &CompositeRenderCtx,
+                _id: InoxNodeUuid,
+        ) {
+            if self.composite_view.borrow().is_none() {
+                return;
+            }
+            let bg = match self.composite_bg.borrow().clone() {
+                Some(b) => b,
+                None => return,
+            };
+            let prev = self.prev_target_view.get();
+            self.target_view.set(prev);
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("inox2d_composite_blend") });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("inox2d_composite_blend"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: unsafe { &*prev },
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.pipeline);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                pass.set_bind_group(0, &self.camera_bg, &[]);
+                pass.set_bind_group(1, &bg, &[]);
+                pass.draw_indexed(0..6, 0, 0..1);
+            }
+            self.queue.submit(Some(encoder.finish()));
+
+            *self.composite_texture.borrow_mut() = None;
+            *self.composite_view.borrow_mut() = None;
+            *self.composite_bg.borrow_mut() = None;
+        }
 }
