@@ -13,6 +13,7 @@ use inox2d::texture::decode_model_textures;
 use wgpu::util::DeviceExt;
 use thiserror::Error;
 
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 const VERT_SHADER: &str = r#"
 struct CameraUniform { mvp: mat4x4<f32>; };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
@@ -65,6 +66,8 @@ pub struct WgpuRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     textures: Vec<wgpu::BindGroup>,
+    stencil_texture: wgpu::Texture,
+    stencil_view: wgpu::TextureView,
     target_view: Cell<*const wgpu::TextureView>,
     pub camera: Camera,
     pub viewport: UVec2,
@@ -292,6 +295,18 @@ impl WgpuRenderer {
             cache: None,
         });
 
+        let stencil_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("inox2d_stencil"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let stencil_view = stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         Ok(Self {
             device,
             queue,
@@ -303,6 +318,8 @@ impl WgpuRenderer {
             bind_group_layout,
             pipeline,
             textures,
+            stencil_texture,
+            stencil_view,
             target_view: Cell::new(core::ptr::null()),
             camera: Camera::default(),
             viewport: UVec2::ZERO,
@@ -311,6 +328,17 @@ impl WgpuRenderer {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.viewport = UVec2::new(width, height);
+        self.stencil_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("inox2d_stencil"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.stencil_view = self.stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
     }
 
     pub fn set_target_view(&self, view: &wgpu::TextureView) {
@@ -326,10 +354,29 @@ impl WgpuRenderer {
 }
 
 impl InoxRenderer for WgpuRenderer {
-	fn on_begin_masks(&self, _masks: &Masks) {}
-	fn on_begin_mask(&self, _mask: &Mask) {}
-	fn on_begin_masked_content(&self) {}
-	fn on_end_mask(&self) {}
+        fn on_begin_masks(&self, masks: &Masks) {
+            let clear_val = if masks.has_masks() { 0 } else { 1 };
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("inox2d_clear_stencil") });
+            {
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("inox2d_clear_stencil"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.stencil_view,
+                        depth_ops: None,
+                        stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(clear_val), store: wgpu::StoreOp::Store }),
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+            self.queue.submit(Some(encoder.finish()));
+        }
+        fn on_begin_mask(&self, _mask: &Mask) {}
+        fn on_begin_masked_content(&self) {}
+        fn on_end_mask(&self) {}
 
         fn draw_textured_mesh_content(
                 &self,
@@ -349,7 +396,11 @@ impl InoxRenderer for WgpuRenderer {
                         resolve_target: None,
                         ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
                     })],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.stencil_view,
+                        depth_ops: None,
+                        stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                    }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
