@@ -1,4 +1,5 @@
 use glam::{Mat4, UVec2};
+use std::cell::Cell;
 use inox2d::math::camera::Camera;
 use inox2d::model::Model;
 use inox2d::node::{
@@ -64,7 +65,7 @@ pub struct WgpuRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     textures: Vec<wgpu::BindGroup>,
-    dummy_view: wgpu::TextureView,
+    target_view: Cell<*const wgpu::TextureView>,
     pub camera: Camera,
     pub viewport: UVec2,
 }
@@ -291,18 +292,6 @@ impl WgpuRenderer {
             cache: None,
         });
 
-        let dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("inox2d_dummy"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let dummy_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
         Ok(Self {
             device,
             queue,
@@ -314,15 +303,19 @@ impl WgpuRenderer {
             bind_group_layout,
             pipeline,
             textures,
-            dummy_view,
+            target_view: Cell::new(core::ptr::null()),
             camera: Camera::default(),
             viewport: UVec2::ZERO,
         })
     }
 
-	pub fn resize(&mut self, width: u32, height: u32) {
-		self.viewport = UVec2::new(width, height);
-	}
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.viewport = UVec2::new(width, height);
+    }
+
+    pub fn set_target_view(&self, view: &wgpu::TextureView) {
+        self.target_view.set(view as *const _);
+    }
 
         pub fn on_begin_draw(&self, _puppet: &Puppet) {
             let mvp = self.camera.matrix(self.viewport.as_vec2());
@@ -352,7 +345,7 @@ impl InoxRenderer for WgpuRenderer {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("inox2d_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.dummy_view,
+                        view: unsafe { &*self.target_view.get() },
                         resolve_target: None,
                         ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
                     })],

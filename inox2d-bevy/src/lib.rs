@@ -2,6 +2,7 @@ use bevy::asset::AssetLoader;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::render::renderer::{RenderDevice, RenderQueue};
+use bevy::render::view::ViewTarget;
 use futures_lite::future::block_on;
 use inox2d::formats::inp::{parse_inp, ParseInpError};
 use inox2d::model::Model;
@@ -96,10 +97,16 @@ pub fn update_puppets(
         }
 }
 
-pub fn draw_puppets(assets: Res<Assets<InoxAsset>>, query: Query<(&InoxModelHandle, &InoxWgpuRenderer)>) {
-	for (handle, renderer) in &query {
-		if let Some(model) = assets.get(&handle.0) {
-			renderer.0.draw(&model.0.puppet);
-		}
-	}
+pub fn draw_puppets(
+        assets: Res<Assets<InoxAsset>>,
+        targets: Query<&ViewTarget>,
+        query: Query<(&InoxModelHandle, &InoxWgpuRenderer)>,
+) {
+        let Ok(view_target) = targets.get_single() else { return; };
+        for (handle, renderer) in &query {
+                if let Some(model) = assets.get(&handle.0) {
+                        renderer.0.set_target_view(view_target.out_texture());
+                        renderer.0.draw(&model.0.puppet);
+                }
+        }
 }
