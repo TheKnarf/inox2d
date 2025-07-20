@@ -1,6 +1,7 @@
 use bevy::asset::AssetLoader;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
+use bevy::render::{MainWorld, RenderApp, RenderSet, Render};
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::view::ViewTarget;
 use futures_lite::future::block_on;
@@ -56,11 +57,19 @@ impl AssetLoader for InoxAssetLoader {
 pub struct Inox2dPlugin;
 
 impl Plugin for Inox2dPlugin {
-	fn build(&self, app: &mut App) {
-		app.init_asset_loader::<InoxAssetLoader>()
-			.init_asset::<InoxAsset>()
-			.add_systems(Update, (update_puppets, draw_puppets));
-	}
+        fn build(&self, app: &mut App) {
+                app.init_asset_loader::<InoxAssetLoader>()
+                        .init_asset::<InoxAsset>()
+                        .add_systems(Update, update_puppets);
+
+                if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+                        render_app.add_systems(
+                                Render,
+                                draw_puppets
+                                        .after(RenderSet::Render),
+                        );
+                }
+        }
 }
 #[derive(Component)]
 pub struct InoxModelHandle(pub Handle<InoxAsset>);
@@ -98,12 +107,15 @@ pub fn update_puppets(
 }
 
 pub fn draw_puppets(
-        assets: Res<Assets<InoxAsset>>,
+        mut main_world: ResMut<MainWorld>,
         targets: Query<&ViewTarget>,
-        query: Query<(&InoxModelHandle, &InoxWgpuRenderer)>,
 ) {
         let Ok(view_target) = targets.get_single() else { return; };
-        for (handle, renderer) in &query {
+
+        let mut query = main_world.query::<(&InoxModelHandle, &InoxWgpuRenderer)>();
+        let assets = main_world.resource::<Assets<InoxAsset>>();
+
+        for (handle, renderer) in query.iter(&*main_world) {
                 if let Some(model) = assets.get(&handle.0) {
                         renderer.0.set_target_view(view_target.out_texture());
                         renderer.0.draw(&model.0.puppet);
