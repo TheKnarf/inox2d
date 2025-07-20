@@ -1,0 +1,12 @@
+[package]
+name = "render-bevy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.16", default-features = false, features = ["bevy_asset","bevy_winit","bevy_render","bevy_core_pipeline","x11"] }
+inox2d-bevy = { path = "../../inox2d-bevy" }
+
+[dependencies.glam]
+version = "0.29"
+features = ["serde"]

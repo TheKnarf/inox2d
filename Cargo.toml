@@ -4,4 +4,6 @@ members = [
     "inox2d",
     "inox2d-opengl",
     "examples/*",
+    "inox2d-wgpu",
+    "inox2d-bevy",
 ]
