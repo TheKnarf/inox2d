@@ -1,0 +1,16 @@
+[package]
+name = "inox2d-wgpu"
+version = "0.1.0"
+edition = "2021"
+description = "WGPU renderer for Inox2D"
+
+[dependencies]
+wgpu = "24"
+thiserror = "1"
+bytemuck = { version = "1", features = ["derive"] }
+
+inox2d = { path = "../inox2d" }
+
+[dependencies.glam]
+version = "0.29"
+features = ["serde"]
