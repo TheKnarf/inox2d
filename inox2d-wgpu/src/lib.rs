@@ -79,6 +79,13 @@ pub struct WgpuRenderer {
     pub viewport: UVec2,
 }
 
+// WgpuRenderer interacts exclusively with the render thread. The underlying
+// wgpu types are thread-safe, but interior pointers stored in `Cell` and
+// `RefCell` mean the compiler can't automatically prove Send/Sync. Rendering
+// occurs on a single thread, so declaring these as safe is acceptable here.
+unsafe impl Send for WgpuRenderer {}
+unsafe impl Sync for WgpuRenderer {}
+
 impl WgpuRenderer {
     pub fn new(device: wgpu::Device, queue: wgpu::Queue, model: &Model) -> Result<Self, WgpuRendererError> {
         let verts = model
