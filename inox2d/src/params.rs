@@ -8,7 +8,7 @@ use crate::math::{
 	matrix::Matrix2d,
 };
 use crate::node::{
-	components::{DeformSource, DeformStack, Mesh, TransformStore, ZSort},
+	components::{DeformSource, DeformStack, Drawable, Mesh, TransformStore, ZSort},
 	InoxNodeUuid,
 };
 use crate::puppet::{Puppet, World};
@@ -32,8 +32,7 @@ pub enum BindingValues {
 	TransformRY(Matrix2d<f32>),
 	TransformRZ(Matrix2d<f32>),
 	Deform(Matrix2d<Vec<Vec2>>),
-	// TODO
-	Opacity,
+	Opacity(Matrix2d<f32>),
 }
 
 #[derive(Debug, Clone)]
@@ -224,8 +223,12 @@ impl Param {
 						.expect("Nodes being deformed must have a DeformStack component.")
 						.push(DeformSource::Param(self.uuid), Deform::Direct(direct_deform));
 				}
-				// TODO
-				BindingValues::Opacity => {}
+				BindingValues::Opacity(ref matrix) => {
+					let (out_top, out_bottom) = ranges_out(matrix, x_mindex, x_maxdex, y_mindex, y_maxdex);
+
+					comps.get_mut::<Drawable>(binding.node).unwrap().blending.opacity *=
+						bi_interpolate_f32(val_normed, range_in, out_top, out_bottom, binding.interpolate_mode);
+				}
 			}
 		}
 	}
@@ -277,4 +280,55 @@ impl ParamCtx {
 pub enum SetParamError {
 	#[error("No parameter named {0}")]
 	NoParameterNamed(String),
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::node::components::{BlendMode, Blending, Drawable};
+	use glam::{vec3, Vec3};
+
+	#[test]
+	fn opacity_binding_applies() {
+		let node = InoxNodeUuid(0);
+		let mut world = World::new();
+		world.add(
+			node,
+			Drawable {
+				blending: Blending {
+					mode: BlendMode::Normal,
+					tint: Vec3::ONE,
+					screen_tint: Vec3::ZERO,
+					opacity: 1.0,
+				},
+				masks: None,
+			},
+		);
+
+		let binding = Binding {
+			node,
+			is_set: Matrix2d::from_slice_vecs(&[vec![true, true], vec![true, true]], true).unwrap(),
+			interpolate_mode: InterpolateMode::Linear,
+			values: BindingValues::Opacity(Matrix2d::from_slice_vecs(&[vec![1.0, 0.5], vec![1.0, 0.5]], true).unwrap()),
+		};
+
+		let param = Param {
+			uuid: ParamUuid(1),
+			name: "op".to_string(),
+			is_vec2: false,
+			min: Vec2::ZERO,
+			max: Vec2::ONE,
+			defaults: Vec2::ZERO,
+			axis_points: AxisPoints {
+				x: vec![0.0, 1.0],
+				y: vec![0.0, 1.0],
+			},
+			bindings: vec![binding],
+		};
+
+		param.apply(Vec2::ONE, &mut world);
+
+		let drawable = world.get::<Drawable>(node).unwrap();
+		assert!((drawable.blending.opacity - 0.5).abs() < f32::EPSILON);
+	}
 }
