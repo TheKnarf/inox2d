@@ -66,6 +66,7 @@ impl Plugin for Inox2dPlugin {
                         render_app.add_systems(
                                 Render,
                                 draw_puppets
+                                        .in_set(RenderSet::Render)
                                         .after(RenderSet::Render),
                         );
                 }
@@ -111,14 +112,21 @@ pub fn draw_puppets(
         targets: Query<&ViewTarget>,
 ) {
         let Ok(view_target) = targets.get_single() else { return; };
+        let width = view_target.main_texture().width();
+        let height = view_target.main_texture().height();
 
-        let mut query = main_world.query::<(&InoxModelHandle, &InoxWgpuRenderer)>();
-        let assets = main_world.resource::<Assets<InoxAsset>>();
-
-        for (handle, renderer) in query.iter(&*main_world) {
-                if let Some(model) = assets.get(&handle.0) {
-                        renderer.0.set_target_view(view_target.out_texture());
-                        renderer.0.draw(&model.0.puppet);
+        main_world.resource_scope(|world, mut assets: Mut<Assets<InoxAsset>>| {
+                let mut query = world.query::<(&InoxModelHandle, &mut InoxWgpuRenderer)>();
+                for (handle, mut renderer) in query.iter_mut(world) {
+                        if let Some(model) = assets.get(&handle.0) {
+                                if renderer.0.viewport.x != width || renderer.0.viewport.y != height {
+                                        renderer.0.resize(width, height);
+                                }
+                                renderer.0.set_target_view(view_target.out_texture());
+                                renderer.0.on_begin_draw(&model.0.puppet);
+                                renderer.0.draw(&model.0.puppet);
+                                renderer.0.on_end_draw(&model.0.puppet);
+                        }
                 }
-        }
+        });
 }
