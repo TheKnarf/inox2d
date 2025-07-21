@@ -109,7 +109,7 @@ impl WgpuRenderer {
 		let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("inox2d_verts"),
 			contents: bytemuck::cast_slice(&vertices),
-			usage: wgpu::BufferUsages::VERTEX,
+			usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
 		});
 		let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("inox2d_indices"),
@@ -410,10 +410,24 @@ impl WgpuRenderer {
 		self.target_view.set(view as *const _);
 	}
 
-	pub fn on_begin_draw(&self, _puppet: &Puppet) {
+	pub fn on_begin_draw(&self, puppet: &Puppet) {
 		let mvp = self.camera.matrix(self.viewport.as_vec2());
 		let arr = mvp.to_cols_array();
 		self.queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&arr));
+
+		let render_ctx = puppet
+			.render_ctx
+			.as_ref()
+			.expect("Rendering for a puppet must be initialized by now.");
+		let verts = &render_ctx.vertex_buffers.verts;
+		let uvs = &render_ctx.vertex_buffers.uvs;
+		let deforms = &render_ctx.vertex_buffers.deforms;
+		let mut vertices: Vec<[f32; 6]> = Vec::with_capacity(verts.len());
+		for i in 0..verts.len() {
+			vertices.push([verts[i].x, verts[i].y, uvs[i].x, uvs[i].y, deforms[i].x, deforms[i].y]);
+		}
+		self.queue
+			.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 	}
 	pub fn on_end_draw(&self, _puppet: &Puppet) {}
 }
