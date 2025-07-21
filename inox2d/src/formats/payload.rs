@@ -464,8 +464,7 @@ fn deserialize_binding_values(param_name: &str, values: &[JsonValue]) -> InoxPar
 
 			BindingValues::Deform(Matrix2d::from_slice_vecs(&parsed, true)?)
 		}
-		// TODO
-		"opacity" => BindingValues::Opacity,
+		"opacity" => BindingValues::Opacity(deserialize_inner_binding_values(values)?),
 		param_name => return Err(InoxParseError::UnknownParamName(param_name.to_owned())),
 	})
 }
@@ -537,4 +536,21 @@ fn deserialize_puppet_usage_rights(obj: JsonObject) -> InoxParseResult<PuppetUsa
 		},
 		require_attribution: obj.get_bool("require_attribution")?,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn parse_opacity_binding_values() {
+		let values = vec![json::JsonValue::Array(vec![json::JsonValue::from(0.75)])];
+		let binding = deserialize_binding_values("opacity", &values).unwrap();
+		match binding {
+			BindingValues::Opacity(matrix) => {
+				assert_eq!(matrix[(0, 0)], 0.75);
+			}
+			_ => panic!("Unexpected variant"),
+		}
+	}
 }
