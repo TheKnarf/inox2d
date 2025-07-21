@@ -78,6 +78,15 @@ See the [`render_webgl`](/examples/render_webgl) example.
 
 ![WebGL-rendered Aka](https://fs.speykious.dev/inox2d/inox2d-webgl-foxgirl.png)
 
+### Bevy plugin
+
+The [`inox2d-bevy`] crate integrates Inox2D with Bevy and renders using `wgpu`.
+Attach [`InoxCamera`] to the same entity as `InoxModelHandle` to control the
+view. Modify the camera's `position`, `scale` or `rotation` fields and the
+plugin will apply them each frame.
+
+See [`examples/render-bevy`](/examples/render-bevy) for a minimal setup.
+
 ## Implementation
 
 Inox2D aims to support all features currently present in the standard D implementation.
