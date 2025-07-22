@@ -48,6 +48,16 @@ fn vs_main(v: VertexIn) -> VertexOut {
 "#;
 
 const FRAG_SHADER: &str = r#"
+struct VertexOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+struct FragUniform {
+    mult_color: vec4<f32>,
+    screen_color: vec4<f32>,
+    params: vec4<f32>,
+};
 @group(1) @binding(0) var samp: sampler;
 @group(1) @binding(1) var tex_albedo: texture_2d<f32>;
 @group(1) @binding(2) var tex_emissive: texture_2d<f32>;
@@ -67,6 +77,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 "#;
 
 const MASK_FRAG_SHADER: &str = r#"
+struct VertexOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
 @group(1) @binding(0) var samp: sampler;
 @group(1) @binding(1) var tex_albedo: texture_2d<f32>;
 
