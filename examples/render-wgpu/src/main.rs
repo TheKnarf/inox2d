@@ -3,7 +3,6 @@ use std::{error::Error, fs};
 
 use clap::Parser;
 use glam::Vec2;
-use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use wgpu::{Surface, SurfaceConfiguration};
@@ -97,9 +96,10 @@ async fn init_wgpu(
 async fn run() -> Result<(), Box<dyn Error>> {
 	let cli = Cli::parse();
 
+	let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 	tracing_subscriber::registry()
 		.with(fmt::layer())
-		.with(EnvFilter::from_default_env().add_directive(LevelFilter::INFO.into()))
+		.with(env_filter)
 		.init();
 
 	tracing::info!("Parsing puppet");

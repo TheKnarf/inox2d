@@ -8,7 +8,7 @@ use inox2d_opengl::OpenglRenderer;
 
 use clap::Parser;
 use glam::Vec2;
-use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 
@@ -33,9 +33,10 @@ struct Cli {
 fn main() -> Result<(), Box<dyn Error>> {
 	let cli = Cli::parse();
 
+	let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 	tracing_subscriber::registry()
 		.with(fmt::layer())
-		.with(LevelFilter::INFO)
+		.with(env_filter)
 		.init();
 
 	tracing::info!("Parsing puppet");
