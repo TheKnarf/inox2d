@@ -462,7 +462,7 @@ impl InoxRenderer for OpenglRenderer {
 			gl.stencil_func(glow::ALWAYS, 1, 0xff);
 			gl.disable(glow::STENCIL_TEST);
 		}
-		
+
 		self.pop_debug_group();
 	}
 
@@ -660,12 +660,12 @@ impl OpenglRenderer {
 		self.pop_debug_group();
 
 		self.push_debug_group("inox2d - end draw");
-		
+
 		let gl = &self.gl;
 		unsafe {
 			gl.bind_vertex_array(None);
 		}
-		
+
 		self.pop_debug_group();
 	}
 }

@@ -73,9 +73,9 @@ impl Plugin for Inox2dPlugin {
 			.add_event::<RendererInitFailed>()
 			.add_systems(Update, (update_puppets, sync_inox_camera, sync_inox_render_config));
 
-                if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-                        render_app.add_systems(Render, draw_puppets.in_set(RenderSet::Render));
-                }
+		if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+			render_app.add_systems(Render, draw_puppets.in_set(RenderSet::Render));
+		}
 	}
 }
 #[derive(Component)]
@@ -154,12 +154,12 @@ pub fn update_puppets(
 			if renderer.is_none() {
 				if let (Some(device), Some(queue)) = (render_device.as_ref(), render_queue.as_ref()) {
 					let wgpu_queue = queue.0.as_ref().clone().into_inner();
-                                        match WgpuRenderer::new(
-                                                device.wgpu_device().clone(),
-                                                wgpu_queue,
-                                                &model.0,
-                                                bevy::render::render_resource::TextureFormat::bevy_default(),
-                                        ) {
+					match WgpuRenderer::new(
+						device.wgpu_device().clone(),
+						wgpu_queue,
+						&model.0,
+						bevy::render::render_resource::TextureFormat::bevy_default(),
+					) {
 						Ok(r) => {
 							commands
 								.entity(entity)
@@ -168,7 +168,7 @@ pub fn update_puppets(
 						}
 						Err(e) => {
 							error!("failed to create WgpuRenderer: {}", e);
-                                                        error_events.write(RendererInitFailed {
+							error_events.write(RendererInitFailed {
 								entity,
 								error: e.to_string(),
 							});
@@ -189,13 +189,13 @@ pub fn update_puppets(
 }
 
 pub fn draw_puppets(mut main_world: ResMut<MainWorld>, targets: Query<&ViewTarget>) {
-    let Ok(view_target) = targets.single() else {
+	let Ok(view_target) = targets.single() else {
 		return;
 	};
 	let width = view_target.main_texture().width();
 	let height = view_target.main_texture().height();
 
-    main_world.resource_scope(|world, assets: Mut<Assets<InoxAsset>>| {
+	main_world.resource_scope(|world, assets: Mut<Assets<InoxAsset>>| {
 		let mut query = world.query::<(&InoxModelHandle, &mut InoxWgpuRenderer)>();
 		for (handle, mut renderer) in query.iter_mut(world) {
 			if let Some(model) = assets.get(&handle.0) {
