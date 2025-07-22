@@ -97,9 +97,15 @@ async fn run() -> Result<(), Box<dyn Error>> {
 	// Leak the window so the surface can outlive the original binding.
 	let window: &'static Window = Box::leak(Box::new(window));
 
-	let (surface, device, queue, mut surface_config) = init_wgpu(window).await?;
-	let mut renderer = WgpuRenderer::new(device.clone(), queue.clone(), &model)?;
-	renderer.resize(surface_config.width, surface_config.height);
+        let (surface, device, queue, mut surface_config) = init_wgpu(window).await?;
+        device.on_uncaptured_error(Box::new(|e| {
+            tracing::error!("wgpu uncaptured error: {:?}", e);
+        }));
+
+        tracing::info!("Initializing Inox2D renderer");
+        let mut renderer = WgpuRenderer::new(device.clone(), queue.clone(), &model, surface_config.format)?;
+        tracing::info!("Inox2D renderer initialized");
+        renderer.resize(surface_config.width, surface_config.height);
 	renderer.camera.scale = Vec2::splat(0.15);
 
 	let mut scene_ctrl = ExampleSceneController::new(&renderer.camera, 0.5);

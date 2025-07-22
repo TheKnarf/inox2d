@@ -163,8 +163,9 @@ pub struct WgpuRenderer {
 	prev_target_view: Cell<*const wgpu::TextureView>,
 	stencil_texture: wgpu::Texture,
 	stencil_view: wgpu::TextureView,
-	target_view: Cell<*const wgpu::TextureView>,
-	pub camera: Camera,
+        target_view: Cell<*const wgpu::TextureView>,
+        output_format: wgpu::TextureFormat,
+        pub camera: Camera,
         pub viewport: UVec2,
         pub blend_mode: BlendMode,
         pub tint: Vec3,
@@ -180,7 +181,13 @@ unsafe impl Send for WgpuRenderer {}
 unsafe impl Sync for WgpuRenderer {}
 
 impl WgpuRenderer {
-	pub fn new(device: wgpu::Device, queue: wgpu::Queue, model: &Model) -> Result<Self, WgpuRendererError> {
+    pub fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        model: &Model,
+        output_format: wgpu::TextureFormat,
+    ) -> Result<Self, WgpuRendererError> {
+        tracing::info!("Initializing Inox2D renderer");
 		let verts = model
 			.puppet
 			.render_ctx
@@ -423,11 +430,11 @@ impl WgpuRenderer {
 					module: &fragment_module,
 					entry_point: Some("fs_main"),
 					compilation_options: Default::default(),
-					targets: &[Some(wgpu::ColorTargetState {
-						format: wgpu::TextureFormat::Bgra8UnormSrgb,
-						blend: Some(blend),
-						write_mask: wgpu::ColorWrites::ALL,
-					})],
+                                        targets: &[Some(wgpu::ColorTargetState {
+                                                format: output_format,
+                                                blend: Some(blend),
+                                                write_mask: wgpu::ColorWrites::ALL,
+                                        })],
 				}),
 				primitive: wgpu::PrimitiveState::default(),
 				depth_stencil: Some(wgpu::DepthStencilState {
@@ -477,10 +484,10 @@ impl WgpuRenderer {
                                 entry_point: Some("fs_mask"),
                                 compilation_options: Default::default(),
                                 targets: &[Some(wgpu::ColorTargetState {
-                                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                                        format: output_format,
                                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                                         write_mask: wgpu::ColorWrites::empty(),
-				})],
+                                })],
 			}),
 			primitive: wgpu::PrimitiveState::default(),
 			depth_stencil: Some(wgpu::DepthStencilState {
@@ -524,9 +531,10 @@ impl WgpuRenderer {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
 			view_formats: &[],
 		});
-		let stencil_view = stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let stencil_view = stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-		Ok(Self {
+                tracing::info!("Inox2D renderer initialized");
+                Ok(Self {
 			device,
 			queue,
                         vertex_buffer,
@@ -550,6 +558,7 @@ impl WgpuRenderer {
 			stencil_texture,
 			stencil_view,
                         target_view: Cell::new(core::ptr::null()),
+                        output_format,
                         camera: Camera::default(),
                         viewport: UVec2::ZERO,
                         blend_mode: BlendMode::Normal,
@@ -750,16 +759,16 @@ impl InoxRenderer for WgpuRenderer {
 			height: self.viewport.y.max(1),
 			depth_or_array_layers: 1,
 		};
-		let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-			label: Some("inox2d_composite"),
-			size,
-			mip_level_count: 1,
-			sample_count: 1,
-			dimension: wgpu::TextureDimension::D2,
-			format: wgpu::TextureFormat::Bgra8UnormSrgb,
-			usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-			view_formats: &[],
-		});
+                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("inox2d_composite"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.output_format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                });
 		let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 		let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: Some("inox2d_composite_bg"),

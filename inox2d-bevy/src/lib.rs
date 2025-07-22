@@ -154,7 +154,12 @@ pub fn update_puppets(
 			if renderer.is_none() {
 				if let (Some(device), Some(queue)) = (render_device.as_ref(), render_queue.as_ref()) {
 					let wgpu_queue = queue.0.as_ref().clone().into_inner();
-					match WgpuRenderer::new(device.wgpu_device().clone(), wgpu_queue, &model.0) {
+                                        match WgpuRenderer::new(
+                                                device.wgpu_device().clone(),
+                                                wgpu_queue,
+                                                &model.0,
+                                                bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb,
+                                        ) {
 						Ok(r) => {
 							commands
 								.entity(entity)
