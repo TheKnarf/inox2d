@@ -18,7 +18,9 @@ const VERT_SHADER: &str = r#"
 struct CameraUniform { mvp: mat4x4<f32>; };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(0) var samp: sampler;
-@group(1) @binding(1) var tex: texture_2d<f32>;
+@group(1) @binding(1) var tex_albedo: texture_2d<f32>;
+@group(1) @binding(2) var tex_emissive: texture_2d<f32>;
+@group(1) @binding(3) var tex_bump: texture_2d<f32>;
 
 struct VertexIn {
     @location(0) pos: vec2<f32>;
@@ -31,9 +33,9 @@ struct VertexOut {
 };
 
 struct FragUniform {
-    tint: vec4<f32>;
+    mult_color: vec4<f32>;
     screen_color: vec4<f32>;
-    misc: vec4<f32>;
+    params: vec4<f32>;
 };
 
 @vertex
@@ -47,14 +49,19 @@ fn vs_main(v: VertexIn) -> VertexOut {
 
 const FRAG_SHADER: &str = r#"
 @group(1) @binding(0) var samp: sampler;
-@group(1) @binding(1) var tex: texture_2d<f32>;
+@group(1) @binding(1) var tex_albedo: texture_2d<f32>;
+@group(1) @binding(2) var tex_emissive: texture_2d<f32>;
+@group(1) @binding(3) var tex_bump: texture_2d<f32>;
 @group(2) @binding(0) var<uniform> frag: FragUniform;
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let tex_color = textureSample(tex, samp, in.uv);
+    let tex_color = textureSample(tex_albedo, samp, in.uv);
     let screen_out = vec3<f32>(1.0) - ((vec3<f32>(1.0) - tex_color.xyz) * (vec3<f32>(1.0) - (frag.screen_color.xyz * tex_color.a)));
-    let base = vec4<f32>(screen_out, tex_color.a) * frag.tint * frag.misc.x;
+    var base = vec4<f32>(screen_out, tex_color.a) * frag.mult_color * frag.params.x;
+    let emissive = textureSample(tex_emissive, samp, in.uv).xyz * frag.params.y * base.a;
+    let _bump = textureSample(tex_bump, samp, in.uv); // currently unused
+    base = vec4<f32>(base.xyz + emissive, base.a);
     return base;
 }
 "#;
@@ -118,7 +125,7 @@ pub struct WgpuRenderer {
 	pipelines: Vec<wgpu::RenderPipeline>,
 	mask_pipeline: wgpu::RenderPipeline,
 	stencil_ref: Cell<u32>,
-	textures: Vec<wgpu::BindGroup>,
+	textures: Vec<wgpu::TextureView>,
 	composite_texture: RefCell<Option<wgpu::Texture>>,
 	composite_view: RefCell<Option<wgpu::TextureView>>,
 	composite_bg: RefCell<Option<wgpu::BindGroup>>,
@@ -218,6 +225,26 @@ impl WgpuRenderer {
 					},
 					count: None,
 				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 2,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				wgpu::BindGroupLayoutEntry {
+					binding: 3,
+					visibility: wgpu::ShaderStages::FRAGMENT,
+					ty: wgpu::BindingType::Texture {
+						sample_type: wgpu::TextureSampleType::Float { filterable: true },
+						view_dimension: wgpu::TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
 			],
 		});
 
@@ -269,21 +296,8 @@ impl WgpuRenderer {
 					size,
 				);
 				let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-				let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-					label: Some("inox2d_texture_bind_group"),
-					layout: &texture_layout,
-					entries: &[
-						wgpu::BindGroupEntry {
-							binding: 0,
-							resource: wgpu::BindingResource::Sampler(&sampler),
-						},
-						wgpu::BindGroupEntry {
-							binding: 1,
-							resource: wgpu::BindingResource::TextureView(&view),
-						},
-					],
-				});
-				bg
+				// keep sampler separate, bind groups created per draw
+				view
 			})
 			.collect::<Vec<_>>();
 
@@ -612,8 +626,32 @@ impl InoxRenderer for WgpuRenderer {
 			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 			pass.set_bind_group(0, &self.camera_bg, &[]);
-			let tex = components.texture.tex_albedo.raw();
-			pass.set_bind_group(1, &self.textures[tex], &[]);
+			let albedo = components.texture.tex_albedo.raw();
+			let emissive = components.texture.tex_emissive.raw();
+			let bump = components.texture.tex_bumpmap.raw();
+			let tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+				label: Some("inox2d_texture_set"),
+				layout: &self.texture_layout,
+				entries: &[
+					wgpu::BindGroupEntry {
+						binding: 0,
+						resource: wgpu::BindingResource::Sampler(&self.sampler),
+					},
+					wgpu::BindGroupEntry {
+						binding: 1,
+						resource: wgpu::BindingResource::TextureView(&self.textures[albedo]),
+					},
+					wgpu::BindGroupEntry {
+						binding: 2,
+						resource: wgpu::BindingResource::TextureView(&self.textures[emissive]),
+					},
+					wgpu::BindGroupEntry {
+						binding: 3,
+						resource: wgpu::BindingResource::TextureView(&self.textures[bump]),
+					},
+				],
+			});
+			pass.set_bind_group(1, &tex_bg, &[]);
 			let start = render_ctx.index_offset as u32;
 			let end = start + render_ctx.index_len as u32;
 			pass.draw_indexed(start..end, 0, 0..1);
@@ -654,6 +692,14 @@ impl InoxRenderer for WgpuRenderer {
 				},
 				wgpu::BindGroupEntry {
 					binding: 1,
+					resource: wgpu::BindingResource::TextureView(&view),
+				},
+				wgpu::BindGroupEntry {
+					binding: 2,
+					resource: wgpu::BindingResource::TextureView(&view),
+				},
+				wgpu::BindGroupEntry {
+					binding: 3,
 					resource: wgpu::BindingResource::TextureView(&view),
 				},
 			],
