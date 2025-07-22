@@ -3,7 +3,11 @@ resolver = "2"
 members = [
     "inox2d",
     "inox2d-opengl",
-    "examples/*",
     "inox2d-wgpu",
     "inox2d-bevy",
+    "examples/common",
+    "examples/render-bevy",
+    "examples/render-opengl",
+    "examples/render-webgl",
+    "examples/render-wgpu",
 ]
