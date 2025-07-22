@@ -32,7 +32,7 @@ async fn init_wgpu(
 ) -> Result<(Surface, wgpu::Device, wgpu::Queue, SurfaceConfiguration), Box<dyn Error>> {
 	let size = window.inner_size();
 	let instance = wgpu::Instance::default();
-	let surface = unsafe { instance.create_surface(window)? };
+    let surface = instance.create_surface(window)?;
 	let adapter = instance
 		.request_adapter(&wgpu::RequestAdapterOptions {
 			power_preference: wgpu::PowerPreference::HighPerformance,

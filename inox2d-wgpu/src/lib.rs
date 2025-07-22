@@ -15,7 +15,7 @@ use wgpu::util::DeviceExt;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 const VERT_SHADER: &str = r#"
-struct CameraUniform { mvp: mat4x4<f32>; };
+struct CameraUniform { mvp: mat4x4<f32>, };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(0) var samp: sampler;
 @group(1) @binding(1) var tex_albedo: texture_2d<f32>;
@@ -23,19 +23,19 @@ struct CameraUniform { mvp: mat4x4<f32>; };
 @group(1) @binding(3) var tex_bump: texture_2d<f32>;
 
 struct VertexIn {
-    @location(0) pos: vec2<f32>;
-    @location(1) uv: vec2<f32>;
-    @location(2) deform: vec2<f32>;
+    @location(0) pos: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) deform: vec2<f32>,
 };
 struct VertexOut {
-    @builtin(position) pos: vec4<f32>;
-    @location(0) uv: vec2<f32>;
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 };
 
 struct FragUniform {
-    mult_color: vec4<f32>;
-    screen_color: vec4<f32>;
-    params: vec4<f32>;
+    mult_color: vec4<f32>,
+    screen_color: vec4<f32>,
+    params: vec4<f32>,
 };
 
 @vertex
@@ -70,7 +70,7 @@ const MASK_FRAG_SHADER: &str = r#"
 @group(1) @binding(0) var samp: sampler;
 @group(1) @binding(1) var tex_albedo: texture_2d<f32>;
 
-struct MaskUniform { threshold: f32; };
+struct MaskUniform { threshold: f32, };
 @group(2) @binding(0) var<uniform> mask: MaskUniform;
 
 @fragment
@@ -130,16 +130,12 @@ pub struct WgpuRenderer {
 	queue: wgpu::Queue,
 	vertex_buffer: wgpu::Buffer,
 	index_buffer: wgpu::Buffer,
-	index_len: u32,
 	camera_buf: wgpu::Buffer,
 	camera_bg: wgpu::BindGroup,
-	bind_group_layout: wgpu::BindGroupLayout,
 	texture_layout: wgpu::BindGroupLayout,
 	sampler: wgpu::Sampler,
-	frag_layout: wgpu::BindGroupLayout,
         frag_buf: wgpu::Buffer,
         frag_bg: wgpu::BindGroup,
-        mask_layout: wgpu::BindGroupLayout,
         mask_buf: wgpu::Buffer,
         mask_bg: wgpu::BindGroup,
         pipelines: Vec<wgpu::RenderPipeline>,
@@ -197,7 +193,6 @@ impl WgpuRenderer {
 			usage: wgpu::BufferUsages::INDEX,
 		});
 
-		let index_len = indices.len() as u32;
 
 		let camera_buf = device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("inox2d_camera"),
@@ -304,21 +299,21 @@ impl WgpuRenderer {
 					usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 					view_formats: &[],
 				});
-				queue.write_texture(
-					wgpu::ImageCopyTexture {
-						texture: &texture,
-						mip_level: 0,
-						origin: wgpu::Origin3d::ZERO,
-						aspect: wgpu::TextureAspect::All,
-					},
-					tex.pixels(),
-					wgpu::ImageDataLayout {
-						offset: 0,
-						bytes_per_row: Some(4 * tex.width()),
-						rows_per_image: Some(tex.height()),
-					},
-					size,
-				);
+                                queue.write_texture(
+                                        wgpu::TexelCopyTextureInfo {
+                                                texture: &texture,
+                                                mip_level: 0,
+                                                origin: wgpu::Origin3d::ZERO,
+                                                aspect: wgpu::TextureAspect::All,
+                                        },
+                                        tex.pixels(),
+                                        wgpu::TexelCopyBufferLayout {
+                                                offset: 0,
+                                                bytes_per_row: Some(4 * tex.width()),
+                                                rows_per_image: Some(tex.height()),
+                                        },
+                                        size,
+                                );
 				let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 				// keep sampler separate, bind groups created per draw
 				view
@@ -519,18 +514,14 @@ impl WgpuRenderer {
 		Ok(Self {
 			device,
 			queue,
-			vertex_buffer,
-			index_buffer,
-			index_len,
-			camera_buf,
-			camera_bg,
-			bind_group_layout,
-			texture_layout,
-			sampler,
-                        frag_layout,
+                        vertex_buffer,
+                        index_buffer,
+                        camera_buf,
+                        camera_bg,
+                        texture_layout,
+                        sampler,
                         frag_buf,
                         frag_bg,
-                        mask_layout,
                         mask_buf,
                         mask_bg,
 			pipelines,
