@@ -861,13 +861,14 @@ impl InoxRenderer for WgpuRenderer {
 				timestamp_writes: None,
 				occlusion_query_set: None,
 			});
-			pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
-			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-			pass.set_bind_group(0, &self.camera_bg, &[]);
-			pass.set_bind_group(1, &bg, &[]);
-			pass.draw_indexed(0..6, 0, 0..1);
-		}
+                        pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        pass.set_bind_group(0, &self.camera_bg, &[]);
+                        pass.set_bind_group(1, &bg, &[]);
+                        pass.set_bind_group(2, &self.frag_bg, &[]);
+                        pass.draw_indexed(0..6, 0, 0..1);
+                }
 		self.queue.submit(Some(encoder.finish()));
 
 		*self.composite_texture.borrow_mut() = None;
