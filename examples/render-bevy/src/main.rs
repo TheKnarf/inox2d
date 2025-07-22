@@ -39,7 +39,9 @@ fn control_camera(
         mut cursor_evr: EventReader<CursorMoved>,
         mut wheel_evr: EventReader<MouseWheel>,
 ) {
-        let mut camera = camera_q.single_mut().expect("InoxCamera missing");
+    let Ok(mut camera) = camera_q.single_mut() else {
+        return;
+    };
 
         for ev in cursor_evr.read() {
                 let wev = WindowEvent::CursorMoved {
@@ -84,7 +86,10 @@ fn control_camera(
 }
 
 fn main() {
-        let path = env::args().nth(1).expect("Usage: render-bevy <MODEL>");
+        let Some(path) = env::args().nth(1) else {
+                eprintln!("Usage: render-bevy <MODEL>");
+                std::process::exit(1);
+        };
         App::new()
                 .insert_resource(ModelPath(path))
                 .add_plugins(DefaultPlugins)
