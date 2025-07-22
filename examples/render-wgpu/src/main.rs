@@ -3,7 +3,8 @@ use std::{error::Error, fs};
 
 use clap::Parser;
 use glam::Vec2;
-use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use wgpu::{Surface, SurfaceConfiguration};
 use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
@@ -98,7 +99,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
 	tracing_subscriber::registry()
 		.with(fmt::layer())
-		.with(LevelFilter::INFO)
+		.with(EnvFilter::from_default_env().add_directive(LevelFilter::INFO.into()))
 		.init();
 
 	tracing::info!("Parsing puppet");
