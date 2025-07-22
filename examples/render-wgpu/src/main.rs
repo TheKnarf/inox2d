@@ -41,7 +41,20 @@ async fn init_wgpu(
 		})
 		.await
 		.ok_or("Failed to find an adapter")?;
-	let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default(), None).await?;
+	let limits = wgpu::Limits {
+		max_bind_groups: 5,
+		..wgpu::Limits::default()
+	};
+	let (device, queue) = adapter
+		.request_device(
+			&wgpu::DeviceDescriptor {
+				required_features: wgpu::Features::empty(),
+				required_limits: limits,
+				..Default::default()
+			},
+			None,
+		)
+		.await?;
 	let caps = surface.get_capabilities(&adapter);
 	let format = caps
 		.formats
