@@ -158,7 +158,7 @@ pub fn update_puppets(
                                                 device.wgpu_device().clone(),
                                                 wgpu_queue,
                                                 &model.0,
-                                                bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb,
+                                                bevy::render::render_resource::TextureFormat::bevy_default(),
                                         ) {
 						Ok(r) => {
 							commands
