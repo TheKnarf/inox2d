@@ -90,9 +90,11 @@ fn main() {
                 eprintln!("Usage: render-bevy <MODEL>");
                 std::process::exit(1);
         };
+        use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
+
         App::new()
                 .insert_resource(ModelPath(path))
-                .add_plugins(DefaultPlugins)
+                .add_plugins(DefaultPlugins.build().disable::<PipelinedRenderingPlugin>())
                 .add_plugins(Inox2dPlugin)
                 .add_systems(Startup, setup)
                 .add_systems(Update, control_camera)
