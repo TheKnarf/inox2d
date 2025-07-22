@@ -31,8 +31,11 @@ async fn init_wgpu(
 	window: &Window,
 ) -> Result<(Surface, wgpu::Device, wgpu::Queue, SurfaceConfiguration), Box<dyn Error>> {
 	let size = window.inner_size();
+	tracing::debug!("Initializing WGPU with window size: {:?}", size);
+
 	let instance = wgpu::Instance::default();
 	let surface = instance.create_surface(window)?;
+
 	let adapter = instance
 		.request_adapter(&wgpu::RequestAdapterOptions {
 			power_preference: wgpu::PowerPreference::HighPerformance,
@@ -41,6 +44,11 @@ async fn init_wgpu(
 		})
 		.await
 		.ok_or("Failed to find an adapter")?;
+
+	let info = adapter.get_info();
+	tracing::info!("Using adapter: {} ({:?})", info.name, info.backend);
+	tracing::debug!("Adapter features: {:?}", adapter.features());
+
 	let limits = wgpu::Limits {
 		max_bind_groups: 5,
 		..wgpu::Limits::default()
@@ -55,6 +63,8 @@ async fn init_wgpu(
 			None,
 		)
 		.await?;
+
+	tracing::debug!("Device limits: {:?}", device.limits());
 	let caps = surface.get_capabilities(&adapter);
 	let format = caps
 		.formats
@@ -72,7 +82,14 @@ async fn init_wgpu(
 		alpha_mode: caps.alpha_modes[0],
 		view_formats: vec![],
 	};
+	tracing::debug!("Surface format chosen: {:?}", format);
 	surface.configure(&device, &config);
+	tracing::info!(
+		"Surface configured: {}x{} present_mode={:?}",
+		config.width,
+		config.height,
+		config.present_mode
+	);
 	Ok((surface, device, queue, config))
 }
 
@@ -145,6 +162,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 			e => scene_ctrl.interact(&e, &renderer.camera),
 		},
 		Event::AboutToWait => {
+			tracing::debug!("AboutToWait - beginning frame");
 			scene_ctrl.update(&mut renderer.camera);
 
 			let puppet = &mut model.puppet;
@@ -169,12 +187,15 @@ async fn run() -> Result<(), Box<dyn Error>> {
 					return;
 				}
 			};
+			tracing::debug!("Acquired frame for drawing");
 			let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 			renderer.set_target_view(&view);
+			tracing::debug!("Rendering frame");
 			renderer.on_begin_draw(puppet);
 			renderer.draw(puppet);
 			renderer.on_end_draw(puppet);
 			frame.present();
+			tracing::debug!("Frame presented");
 			window.request_redraw();
 		}
 		_ => {}
