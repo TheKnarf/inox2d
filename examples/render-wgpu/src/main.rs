@@ -192,6 +192,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 			let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 			renderer.set_target_view(&view);
 			tracing::debug!("Rendering frame");
+			renderer.clear();
 			renderer.on_begin_draw(puppet);
 			renderer.draw(puppet);
 			renderer.on_end_draw(puppet);
