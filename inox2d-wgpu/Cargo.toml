@@ -9,6 +9,7 @@ wgpu = "24"
 thiserror = "1"
 bytemuck = { version = "1", features = ["derive"] }
 tracing = "0.1"
+include-wgsl-oil = "0.2"
 
 inox2d = { path = "../inox2d" }
 
