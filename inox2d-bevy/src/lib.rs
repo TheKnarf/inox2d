@@ -16,6 +16,7 @@ use inox2d::formats::inp::{parse_inp, ParseInpError};
 use inox2d::math::camera::Camera;
 use inox2d::model::Model;
 use inox2d::render::InoxRendererExt;
+use inox2d::node::components::BlendMode;
 use inox2d_wgpu::WgpuRenderer;
 
 #[derive(Debug, thiserror::Error)]
@@ -66,9 +67,9 @@ pub struct Inox2dPlugin;
 
 impl Plugin for Inox2dPlugin {
 	fn build(&self, app: &mut App) {
-		app.init_asset_loader::<InoxAssetLoader>()
-			.init_asset::<InoxAsset>()
-			.add_systems(Update, (update_puppets, sync_inox_camera));
+                app.init_asset_loader::<InoxAssetLoader>()
+                        .init_asset::<InoxAsset>()
+                        .add_systems(Update, (update_puppets, sync_inox_camera, sync_inox_render_config));
 
 		if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
 			render_app.add_systems(Render, draw_puppets.in_set(RenderSet::Render).after(RenderSet::Render));
@@ -80,6 +81,20 @@ pub struct InoxModelHandle(pub Handle<InoxAsset>);
 
 #[derive(Component)]
 pub struct InoxWgpuRenderer(pub WgpuRenderer);
+
+#[derive(Component, Clone)]
+pub struct InoxRenderConfig {
+        pub blend_mode: BlendMode,
+        pub tint: Vec3,
+        pub emission_strength: f32,
+        pub mask_threshold: f32,
+}
+
+impl Default for InoxRenderConfig {
+        fn default() -> Self {
+                Self { blend_mode: BlendMode::Normal, tint: Vec3::ONE, emission_strength: 1.0, mask_threshold: 0.5 }
+        }
+}
 
 /// Camera component controlling how Inox2D content is viewed.
 ///
@@ -95,9 +110,20 @@ impl Default for InoxCamera {
 }
 
 pub fn sync_inox_camera(mut query: Query<(&InoxCamera, &mut InoxWgpuRenderer)>) {
-	for (camera, mut renderer) in &mut query {
-		renderer.0.camera = camera.0.clone();
-	}
+        for (camera, mut renderer) in &mut query {
+                renderer.0.camera = camera.0.clone();
+        }
+}
+
+pub fn sync_inox_render_config(
+        mut query: Query<(&InoxRenderConfig, &mut InoxWgpuRenderer)>,
+) {
+        for (config, mut renderer) in &mut query {
+                renderer.0.blend_mode = config.blend_mode;
+                renderer.0.tint = config.tint;
+                renderer.0.emission_strength = config.emission_strength;
+                renderer.0.mask_threshold = config.mask_threshold;
+        }
 }
 
 pub fn update_puppets(
