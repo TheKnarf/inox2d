@@ -8,6 +8,7 @@ description = "WGPU renderer for Inox2D"
 wgpu = "24"
 thiserror = "1"
 bytemuck = { version = "1", features = ["derive"] }
+tracing = "0.1"
 
 inox2d = { path = "../inox2d" }
 
