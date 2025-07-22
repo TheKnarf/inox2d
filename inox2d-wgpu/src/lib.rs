@@ -591,9 +591,41 @@ impl WgpuRenderer {
 			.create_view(&wgpu::TextureViewDescriptor::default());
 	}
 
-	pub fn set_target_view(&self, view: &wgpu::TextureView) {
-		self.target_view.set(view as *const _);
-	}
+        pub fn set_target_view(&self, view: &wgpu::TextureView) {
+                self.target_view.set(view as *const _);
+        }
+
+        pub fn clear(&self) {
+                let mut encoder = self
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("inox2d_clear"),
+                        });
+                {
+                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("inox2d_clear"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: unsafe { &*self.target_view.get() },
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
+                                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                                store: wgpu::StoreOp::Store,
+                                        },
+                                })],
+                                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                        view: &self.stencil_view,
+                                        depth_ops: None,
+                                        stencil_ops: Some(wgpu::Operations {
+                                                load: wgpu::LoadOp::Clear(1),
+                                                store: wgpu::StoreOp::Store,
+                                        }),
+                                }),
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                        });
+                }
+                self.queue.submit(Some(encoder.finish()));
+        }
 
 	pub fn on_begin_draw(&self, puppet: &Puppet) {
 		tracing::debug!("Begin draw");
