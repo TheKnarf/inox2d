@@ -97,10 +97,11 @@ async fn run() -> Result<(), Box<dyn Error>> {
 	// Leak the window so the surface can outlive the original binding.
 	let window: &'static Window = Box::leak(Box::new(window));
 
-	let (surface, device, queue, mut surface_config) = init_wgpu(window).await?;
-	device.on_uncaptured_error(Box::new(|e| {
-		tracing::error!("wgpu uncaptured error: {:?}", e);
-	}));
+        let (surface, device, queue, mut surface_config) = init_wgpu(window).await?;
+        // Store the registration so the callback lives for the entire program
+        let _error_callback = device.on_uncaptured_error(Box::new(|e| {
+                tracing::error!("wgpu uncaptured error: {:?}", e);
+        }));
 
 	tracing::info!("Initializing Inox2D renderer");
 	let mut renderer = WgpuRenderer::new(device.clone(), queue.clone(), &model, surface_config.format)?;
