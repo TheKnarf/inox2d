@@ -67,6 +67,8 @@ pub struct WgpuRenderer {
 	camera_bg: wgpu::BindGroup,
 	transform_buf: wgpu::Buffer,
 	transform_bg: wgpu::BindGroup,
+	origin_buf: wgpu::Buffer,
+	origin_bg: wgpu::BindGroup,
 	texture_layout: wgpu::BindGroupLayout,
 	sampler: wgpu::Sampler,
 	frag_buf: wgpu::Buffer,
@@ -190,6 +192,34 @@ impl WgpuRenderer {
 			entries: &[wgpu::BindGroupEntry {
 				binding: 0,
 				resource: transform_buf.as_entire_binding(),
+			}],
+		});
+
+		let origin_buf = device.create_buffer(&wgpu::BufferDescriptor {
+			label: Some("inox2d_origin"),
+			size: std::mem::size_of::<[f32; 2]>() as u64,
+			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+			mapped_at_creation: false,
+		});
+		let origin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+			label: Some("inox2d_origin_layout"),
+			entries: &[wgpu::BindGroupLayoutEntry {
+				binding: 0,
+				visibility: wgpu::ShaderStages::VERTEX,
+				ty: wgpu::BindingType::Buffer {
+					ty: wgpu::BufferBindingType::Uniform,
+					has_dynamic_offset: false,
+					min_binding_size: None,
+				},
+				count: None,
+			}],
+		});
+		let origin_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+			label: Some("inox2d_origin_bg"),
+			layout: &origin_layout,
+			entries: &[wgpu::BindGroupEntry {
+				binding: 0,
+				resource: origin_buf.as_entire_binding(),
 			}],
 		});
 
@@ -348,12 +378,24 @@ impl WgpuRenderer {
 
 		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: Some("inox2d_pipeline_layout"),
-			bind_group_layouts: &[&bind_group_layout, &texture_layout, &frag_layout, &transform_layout],
+			bind_group_layouts: &[
+				&bind_group_layout,
+				&texture_layout,
+				&frag_layout,
+				&transform_layout,
+				&origin_layout,
+			],
 			push_constant_ranges: &[],
 		});
 		let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 			label: Some("inox2d_mask_pipeline_layout"),
-			bind_group_layouts: &[&bind_group_layout, &texture_layout, &mask_layout, &transform_layout],
+			bind_group_layouts: &[
+				&bind_group_layout,
+				&texture_layout,
+				&mask_layout,
+				&transform_layout,
+				&origin_layout,
+			],
 			push_constant_ranges: &[],
 		});
 
@@ -490,6 +532,8 @@ impl WgpuRenderer {
 			camera_bg,
 			transform_buf,
 			transform_bg,
+			origin_buf,
+			origin_bg,
 			texture_layout,
 			sampler,
 			frag_buf,
@@ -611,8 +655,16 @@ impl InoxRenderer for WgpuRenderer {
 	) {
 		let mvp = self.camera.matrix(self.viewport.as_vec2()) * *components.transform;
 		let arr = mvp.to_cols_array();
+
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
+		let zero = [0.0f32, 0.0f32];
+		self.queue
+			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
+		let origin = components.mesh.origin;
+		let origin_arr = [origin.x, origin.y];
+		self.queue
+			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&origin_arr));
 
 		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 			label: Some("inox2d_pass"),
@@ -669,6 +721,7 @@ impl InoxRenderer for WgpuRenderer {
 			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 			pass.set_bind_group(0, &self.camera_bg, &[]);
 			pass.set_bind_group(3, &self.transform_bg, &[]);
+			pass.set_bind_group(4, &self.origin_bg, &[]);
 			let albedo = components.texture.tex_albedo.raw();
 			let emissive = components.texture.tex_emissive.raw();
 			let bump = components.texture.tex_bumpmap.raw();
@@ -804,6 +857,9 @@ impl InoxRenderer for WgpuRenderer {
 		let arr = mvp.to_cols_array();
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
+		let zero = [0.0f32, 0.0f32];
+		self.queue
+			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
 
 		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 			label: Some("inox2d_composite_blend"),
@@ -837,6 +893,7 @@ impl InoxRenderer for WgpuRenderer {
 			pass.set_bind_group(1, &bg, &[]);
 			pass.set_bind_group(2, &self.frag_bg, &[]);
 			pass.set_bind_group(3, &self.transform_bg, &[]);
+			pass.set_bind_group(4, &self.origin_bg, &[]);
 			pass.draw_indexed(0..6, 0, 0..1);
 		}
 		self.queue.submit(Some(encoder.finish()));
