@@ -1,5 +1,7 @@
 struct CameraUniform { mvp: mat4x4<f32>, };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
+struct TransformUniform { mvp: mat4x4<f32>, };
+@group(3) @binding(0) var<uniform> transform: TransformUniform;
 @group(1) @binding(0) var samp: sampler;
 @group(1) @binding(1) var tex_albedo: texture_2d<f32>;
 @group(1) @binding(2) var tex_emissive: texture_2d<f32>;
@@ -24,7 +26,7 @@ struct FragUniform {
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.pos = camera.mvp * vec4<f32>(v.pos + v.deform, 0.0, 1.0);
+    out.pos = transform.mvp * vec4<f32>(v.pos + v.deform, 0.0, 1.0);
     out.uv = v.uv;
     return out;
 }
