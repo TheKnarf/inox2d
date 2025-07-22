@@ -2,7 +2,7 @@
 # Helper script to run Inox2D examples with sample models
 set -e
 
-REPO_URL="https://github.com/Inochi2D/example-models"
+BASE_URL="https://github.com/Inochi2D/example-models/raw/refs/heads/main"
 MODELS_DIR="examples/example-models"
 
 usage() {
@@ -18,16 +18,17 @@ MODEL="${1:-Aka}"
 [ $# -gt 0 ] && shift
 
 if [ ! -d "$MODELS_DIR" ]; then
-    echo "Cloning example models..."
-    git clone "$REPO_URL" "$MODELS_DIR"
-    (cd "$MODELS_DIR" && git lfs pull)
+    mkdir -p "$MODELS_DIR"
 fi
 
 MODEL_PATH="$MODELS_DIR/${MODEL}.inx"
 if [ ! -f "$MODEL_PATH" ]; then
-    echo "Model $MODEL_PATH not found. Available models:"
-    ls "$MODELS_DIR"/*.inx | xargs -n1 basename | sed 's/\.inx$//'
-    exit 1
+    echo "Downloading ${MODEL}.inx..."
+    if ! curl -Lf "${BASE_URL}/${MODEL}.inx" -o "$MODEL_PATH"; then
+        echo "Failed to download ${MODEL}.inx" >&2
+        rm -f "$MODEL_PATH"
+        exit 1
+    fi
 fi
 
 case "$EXAMPLE" in
