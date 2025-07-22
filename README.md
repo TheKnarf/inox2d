@@ -87,6 +87,16 @@ plugin will apply them each frame.
 
 See [`examples/render-bevy`](/examples/render-bevy) for a minimal setup.
 
+### Running the examples
+
+This repository includes a helper script that downloads the official example
+models and runs any of the example crates. The models are fetched the first time
+the script is executed.
+
+```sh
+./run_example.sh render-opengl Aka
+```
+
 ## Implementation
 
 Inox2D aims to support all features currently present in the standard D implementation.
