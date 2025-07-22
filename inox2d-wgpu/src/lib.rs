@@ -66,6 +66,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+const MASK_FRAG_SHADER: &str = r#"
+@group(1) @binding(0) var samp: sampler;
+@group(1) @binding(1) var tex_albedo: texture_2d<f32>;
+
+struct MaskUniform { threshold: f32; };
+@group(2) @binding(0) var<uniform> mask: MaskUniform;
+
+@fragment
+fn fs_mask(in: VertexOut) -> @location(0) vec4<f32> {
+    let color = textureSample(tex_albedo, samp, in.uv);
+    if (color.a <= mask.threshold) {
+        discard;
+    }
+    return vec4<f32>(1.0);
+}
+"#;
+
 fn blend_state_for(mode: BlendMode) -> wgpu::BlendState {
 	use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as O};
 	let comp = |src, dst, op| BlendComponent {
@@ -120,10 +137,13 @@ pub struct WgpuRenderer {
 	texture_layout: wgpu::BindGroupLayout,
 	sampler: wgpu::Sampler,
 	frag_layout: wgpu::BindGroupLayout,
-	frag_buf: wgpu::Buffer,
-	frag_bg: wgpu::BindGroup,
-	pipelines: Vec<wgpu::RenderPipeline>,
-	mask_pipeline: wgpu::RenderPipeline,
+        frag_buf: wgpu::Buffer,
+        frag_bg: wgpu::BindGroup,
+        mask_layout: wgpu::BindGroupLayout,
+        mask_buf: wgpu::Buffer,
+        mask_bg: wgpu::BindGroup,
+        pipelines: Vec<wgpu::RenderPipeline>,
+        mask_pipeline: wgpu::RenderPipeline,
 	stencil_ref: Cell<u32>,
 	textures: Vec<wgpu::TextureView>,
 	composite_texture: RefCell<Option<wgpu::Texture>>,
@@ -307,30 +327,67 @@ impl WgpuRenderer {
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 			mapped_at_creation: false,
 		});
-		let frag_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-			label: Some("inox2d_frag_bg"),
-			layout: &frag_layout,
-			entries: &[wgpu::BindGroupEntry {
-				binding: 0,
-				resource: frag_buf.as_entire_binding(),
-			}],
-		});
+                let frag_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("inox2d_frag_bg"),
+                        layout: &frag_layout,
+                        entries: &[wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: frag_buf.as_entire_binding(),
+                        }],
+                });
+
+                let mask_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("inox2d_mask_layout"),
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                ty: wgpu::BindingType::Buffer {
+                                        ty: wgpu::BufferBindingType::Uniform,
+                                        has_dynamic_offset: false,
+                                        min_binding_size: None,
+                                },
+                                count: None,
+                        }],
+                });
+                let mask_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("inox2d_mask_buf"),
+                        size: 4,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                });
+                let mask_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("inox2d_mask_bg"),
+                        layout: &mask_layout,
+                        entries: &[wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: mask_buf.as_entire_binding(),
+                        }],
+                });
 
 		let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
 			label: Some("inox2d_shader"),
 			source: wgpu::ShaderSource::Wgsl(VERT_SHADER.into()),
 		});
 
-		let fragment_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-			label: Some("inox2d_frag"),
-			source: wgpu::ShaderSource::Wgsl(FRAG_SHADER.into()),
-		});
+                let fragment_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("inox2d_frag"),
+                        source: wgpu::ShaderSource::Wgsl(FRAG_SHADER.into()),
+                });
+                let mask_fragment_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("inox2d_mask_frag"),
+                        source: wgpu::ShaderSource::Wgsl(MASK_FRAG_SHADER.into()),
+                });
 
-		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-			label: Some("inox2d_pipeline_layout"),
-			bind_group_layouts: &[&bind_group_layout, &texture_layout, &frag_layout],
-			push_constant_ranges: &[],
-		});
+                let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("inox2d_pipeline_layout"),
+                        bind_group_layouts: &[&bind_group_layout, &texture_layout, &frag_layout],
+                        push_constant_ranges: &[],
+                });
+                let mask_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("inox2d_mask_pipeline_layout"),
+                        bind_group_layouts: &[&bind_group_layout, &texture_layout, &mask_layout],
+                        push_constant_ranges: &[],
+                });
 
 		let mut pipelines = Vec::new();
 		for mode in BlendMode::VALUES {
@@ -388,27 +445,27 @@ impl WgpuRenderer {
 			pipelines.push(pipeline);
 		}
 
-		let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-			label: Some("inox2d_mask_pipeline"),
-			layout: Some(&pipeline_layout),
-			vertex: wgpu::VertexState {
-				module: &shader_module,
-				entry_point: Some("vs_main"),
-				compilation_options: Default::default(),
-				buffers: &[wgpu::VertexBufferLayout {
+                let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("inox2d_mask_pipeline"),
+                        layout: Some(&mask_pipeline_layout),
+                        vertex: wgpu::VertexState {
+                                module: &shader_module,
+                                entry_point: Some("vs_main"),
+                                compilation_options: Default::default(),
+                                buffers: &[wgpu::VertexBufferLayout {
 					array_stride: 24,
 					step_mode: wgpu::VertexStepMode::Vertex,
 					attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2],
 				}],
 			},
-			fragment: Some(wgpu::FragmentState {
-				module: &fragment_module,
-				entry_point: Some("fs_main"),
-				compilation_options: Default::default(),
-				targets: &[Some(wgpu::ColorTargetState {
-					format: wgpu::TextureFormat::Bgra8UnormSrgb,
-					blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-					write_mask: wgpu::ColorWrites::empty(),
+                        fragment: Some(wgpu::FragmentState {
+                                module: &mask_fragment_module,
+                                entry_point: Some("fs_mask"),
+                                compilation_options: Default::default(),
+                                targets: &[Some(wgpu::ColorTargetState {
+                                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                                        write_mask: wgpu::ColorWrites::empty(),
 				})],
 			}),
 			primitive: wgpu::PrimitiveState::default(),
@@ -466,9 +523,12 @@ impl WgpuRenderer {
 			bind_group_layout,
 			texture_layout,
 			sampler,
-			frag_layout,
-			frag_buf,
-			frag_bg,
+                        frag_layout,
+                        frag_buf,
+                        frag_bg,
+                        mask_layout,
+                        mask_buf,
+                        mask_bg,
 			pipelines,
 			mask_pipeline,
 			stencil_ref: Cell::new(1),
@@ -533,11 +593,14 @@ impl WgpuRenderer {
 }
 
 impl InoxRenderer for WgpuRenderer {
-	fn on_begin_masks(&self, masks: &Masks) {
-		let clear_val = if masks.has_masks() { 0 } else { 1 };
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("inox2d_clear_stencil"),
-		});
+        fn on_begin_masks(&self, masks: &Masks) {
+                let clear_val = if masks.has_masks() { 0 } else { 1 };
+                let threshold = masks.threshold.clamp(0.0, 1.0);
+                self.queue
+                        .write_buffer(&self.mask_buf, 0, bytemuck::bytes_of(&threshold));
+                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("inox2d_clear_stencil"),
+                });
 		{
 			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("inox2d_clear_stencil"),
@@ -599,29 +662,30 @@ impl InoxRenderer for WgpuRenderer {
 				timestamp_writes: None,
 				occlusion_query_set: None,
 			});
-			if as_mask {
-				pass.set_pipeline(&self.mask_pipeline);
-			} else {
-				let idx = components.drawable.blending.mode as usize;
-				pass.set_pipeline(&self.pipelines[idx]);
-			}
-			let blend = &components.drawable.blending;
-			let data = [
-				blend.tint.x,
-				blend.tint.y,
-				blend.tint.z,
-				1.0,
-				blend.screen_tint.x,
-				blend.screen_tint.y,
-				blend.screen_tint.z,
-				1.0,
-				blend.opacity,
-				1.0,
-				0.0,
-				0.0,
-			];
-			self.queue.write_buffer(&self.frag_buf, 0, bytemuck::cast_slice(&data));
-			pass.set_bind_group(2, &self.frag_bg, &[]);
+                        if as_mask {
+                                pass.set_pipeline(&self.mask_pipeline);
+                                pass.set_bind_group(2, &self.mask_bg, &[]);
+                        } else {
+                                let idx = components.drawable.blending.mode as usize;
+                                pass.set_pipeline(&self.pipelines[idx]);
+                                let blend = &components.drawable.blending;
+                                let data = [
+                                        blend.tint.x,
+                                        blend.tint.y,
+                                        blend.tint.z,
+                                        1.0,
+                                        blend.screen_tint.x,
+                                        blend.screen_tint.y,
+                                        blend.screen_tint.z,
+                                        1.0,
+                                        blend.opacity,
+                                        1.0,
+                                        0.0,
+                                        0.0,
+                                ];
+                                self.queue.write_buffer(&self.frag_buf, 0, bytemuck::cast_slice(&data));
+                                pass.set_bind_group(2, &self.frag_bg, &[]);
+                        }
 			pass.set_stencil_reference(self.stencil_ref.get());
 			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
