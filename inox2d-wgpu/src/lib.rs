@@ -110,6 +110,7 @@ impl WgpuRenderer {
 		output_format: wgpu::TextureFormat,
 	) -> Result<Self, WgpuRendererError> {
 		tracing::info!("Initializing Inox2D renderer");
+		tracing::debug!("Output format: {:?}", output_format);
 		let verts = model
 			.puppet
 			.render_ctx
@@ -125,6 +126,11 @@ impl WgpuRenderer {
 			vertices.push([verts[i].x, verts[i].y, uvs[i].x, uvs[i].y, deforms[i].x, deforms[i].y]);
 		}
 		let indices = &model.puppet.render_ctx.as_ref().unwrap().vertex_buffers.indices;
+		tracing::debug!(
+			"Vertex buffer size: {} vertices, {} indices",
+			verts.len(),
+			indices.len()
+		);
 
 		let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 			label: Some("inox2d_verts"),
@@ -318,6 +324,7 @@ impl WgpuRenderer {
 				view
 			})
 			.collect::<Vec<_>>();
+		tracing::debug!("Loaded {} textures", textures.len());
 
 		let frag_buf = device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("inox2d_frag_buf"),
@@ -454,6 +461,7 @@ impl WgpuRenderer {
 			});
 			pipelines.push(pipeline);
 		}
+		tracing::debug!("Created {} pipelines", pipelines.len());
 
 		let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 			label: Some("inox2d_mask_pipeline"),
@@ -505,6 +513,7 @@ impl WgpuRenderer {
 			multiview: None,
 			cache: None,
 		});
+		tracing::debug!("Mask pipeline created");
 
 		let stencil_texture = device.create_texture(&wgpu::TextureDescriptor {
 			label: Some("inox2d_stencil"),
@@ -587,6 +596,7 @@ impl WgpuRenderer {
 	}
 
 	pub fn on_begin_draw(&self, puppet: &Puppet) {
+		tracing::debug!("Begin draw");
 		let mvp = self.camera.matrix(self.viewport.as_vec2());
 		let arr = mvp.to_cols_array();
 		self.queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&arr));
@@ -605,7 +615,9 @@ impl WgpuRenderer {
 		self.queue
 			.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 	}
-	pub fn on_end_draw(&self, _puppet: &Puppet) {}
+	pub fn on_end_draw(&self, _puppet: &Puppet) {
+		tracing::debug!("End draw");
+	}
 }
 
 impl InoxRenderer for WgpuRenderer {
