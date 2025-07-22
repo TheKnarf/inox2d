@@ -804,7 +804,14 @@ impl InoxRenderer for WgpuRenderer {
 						store: wgpu::StoreOp::Store,
 					},
 				})],
-				depth_stencil_attachment: None,
+                                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                        view: &self.stencil_view,
+                                        depth_ops: None,
+                                        stencil_ops: Some(wgpu::Operations {
+                                                load: wgpu::LoadOp::Load,
+                                                store: wgpu::StoreOp::Store,
+                                        }),
+                                }),
 				timestamp_writes: None,
 				occlusion_query_set: None,
 			});
@@ -843,7 +850,14 @@ impl InoxRenderer for WgpuRenderer {
 						store: wgpu::StoreOp::Store,
 					},
 				})],
-				depth_stencil_attachment: None,
+                                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                        view: &self.stencil_view,
+                                        depth_ops: None,
+                                        stencil_ops: Some(wgpu::Operations {
+                                                load: wgpu::LoadOp::Load,
+                                                store: wgpu::StoreOp::Store,
+                                        }),
+                                }),
 				timestamp_writes: None,
 				occlusion_query_set: None,
 			});
