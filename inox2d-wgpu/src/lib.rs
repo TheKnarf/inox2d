@@ -1,4 +1,4 @@
-use glam::{Mat4, UVec2};
+use glam::{Mat4, UVec2, Vec3};
 use inox2d::math::camera::Camera;
 use inox2d::model::Model;
 use inox2d::node::{
@@ -154,7 +154,11 @@ pub struct WgpuRenderer {
 	stencil_view: wgpu::TextureView,
 	target_view: Cell<*const wgpu::TextureView>,
 	pub camera: Camera,
-	pub viewport: UVec2,
+        pub viewport: UVec2,
+        pub blend_mode: BlendMode,
+        pub tint: Vec3,
+        pub emission_strength: f32,
+        pub mask_threshold: f32,
 }
 
 // WgpuRenderer interacts exclusively with the render thread. The underlying
@@ -539,11 +543,15 @@ impl WgpuRenderer {
 			prev_target_view: Cell::new(core::ptr::null()),
 			stencil_texture,
 			stencil_view,
-			target_view: Cell::new(core::ptr::null()),
-			camera: Camera::default(),
-			viewport: UVec2::ZERO,
-		})
-	}
+                        target_view: Cell::new(core::ptr::null()),
+                        camera: Camera::default(),
+                        viewport: UVec2::ZERO,
+                        blend_mode: BlendMode::Normal,
+                        tint: Vec3::ONE,
+                        emission_strength: 1.0,
+                        mask_threshold: 0.5,
+                })
+        }
 
 	pub fn resize(&mut self, width: u32, height: u32) {
 		self.viewport = UVec2::new(width, height);
@@ -595,7 +603,7 @@ impl WgpuRenderer {
 impl InoxRenderer for WgpuRenderer {
         fn on_begin_masks(&self, masks: &Masks) {
                 let clear_val = if masks.has_masks() { 0 } else { 1 };
-                let threshold = masks.threshold.clamp(0.0, 1.0);
+                let threshold = (masks.threshold * self.mask_threshold).clamp(0.0, 1.0);
                 self.queue
                         .write_buffer(&self.mask_buf, 0, bytemuck::bytes_of(&threshold));
                 let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -666,20 +674,21 @@ impl InoxRenderer for WgpuRenderer {
                                 pass.set_pipeline(&self.mask_pipeline);
                                 pass.set_bind_group(2, &self.mask_bg, &[]);
                         } else {
-                                let idx = components.drawable.blending.mode as usize;
+                                let idx = self.blend_mode as usize;
                                 pass.set_pipeline(&self.pipelines[idx]);
                                 let blend = &components.drawable.blending;
+                                let tint = blend.tint * self.tint;
                                 let data = [
-                                        blend.tint.x,
-                                        blend.tint.y,
-                                        blend.tint.z,
+                                        tint.x,
+                                        tint.y,
+                                        tint.z,
                                         1.0,
                                         blend.screen_tint.x,
                                         blend.screen_tint.y,
                                         blend.screen_tint.z,
                                         1.0,
                                         blend.opacity,
-                                        1.0,
+                                        self.emission_strength,
                                         0.0,
                                         0.0,
                                 ];
