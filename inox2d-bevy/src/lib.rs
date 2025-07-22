@@ -15,9 +15,10 @@ use futures_lite::future::block_on;
 use inox2d::formats::inp::{parse_inp, ParseInpError};
 use inox2d::math::camera::Camera;
 use inox2d::model::Model;
-use inox2d::render::InoxRendererExt;
 use inox2d::node::components::BlendMode;
+use inox2d::render::InoxRendererExt;
 use inox2d_wgpu::WgpuRenderer;
+use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InoxAssetError {
@@ -67,9 +68,10 @@ pub struct Inox2dPlugin;
 
 impl Plugin for Inox2dPlugin {
 	fn build(&self, app: &mut App) {
-                app.init_asset_loader::<InoxAssetLoader>()
-                        .init_asset::<InoxAsset>()
-                        .add_systems(Update, (update_puppets, sync_inox_camera, sync_inox_render_config));
+		app.init_asset_loader::<InoxAssetLoader>()
+			.init_asset::<InoxAsset>()
+			.add_event::<RendererInitFailed>()
+			.add_systems(Update, (update_puppets, sync_inox_camera, sync_inox_render_config));
 
 		if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
 			render_app.add_systems(Render, draw_puppets.in_set(RenderSet::Render).after(RenderSet::Render));
@@ -82,18 +84,32 @@ pub struct InoxModelHandle(pub Handle<InoxAsset>);
 #[derive(Component)]
 pub struct InoxWgpuRenderer(pub WgpuRenderer);
 
+#[derive(Event, Debug, Clone)]
+pub struct RendererInitFailed {
+	pub entity: Entity,
+	pub error: String,
+}
+
+#[derive(Component, Debug)]
+pub struct InoxRendererError(pub String);
+
 #[derive(Component, Clone)]
 pub struct InoxRenderConfig {
-        pub blend_mode: BlendMode,
-        pub tint: Vec3,
-        pub emission_strength: f32,
-        pub mask_threshold: f32,
+	pub blend_mode: BlendMode,
+	pub tint: Vec3,
+	pub emission_strength: f32,
+	pub mask_threshold: f32,
 }
 
 impl Default for InoxRenderConfig {
-        fn default() -> Self {
-                Self { blend_mode: BlendMode::Normal, tint: Vec3::ONE, emission_strength: 1.0, mask_threshold: 0.5 }
-        }
+	fn default() -> Self {
+		Self {
+			blend_mode: BlendMode::Normal,
+			tint: Vec3::ONE,
+			emission_strength: 1.0,
+			mask_threshold: 0.5,
+		}
+	}
 }
 
 /// Camera component controlling how Inox2D content is viewed.
@@ -110,20 +126,18 @@ impl Default for InoxCamera {
 }
 
 pub fn sync_inox_camera(mut query: Query<(&InoxCamera, &mut InoxWgpuRenderer)>) {
-        for (camera, mut renderer) in &mut query {
-                renderer.0.camera = camera.0.clone();
-        }
+	for (camera, mut renderer) in &mut query {
+		renderer.0.camera = camera.0.clone();
+	}
 }
 
-pub fn sync_inox_render_config(
-        mut query: Query<(&InoxRenderConfig, &mut InoxWgpuRenderer)>,
-) {
-        for (config, mut renderer) in &mut query {
-                renderer.0.blend_mode = config.blend_mode;
-                renderer.0.tint = config.tint;
-                renderer.0.emission_strength = config.emission_strength;
-                renderer.0.mask_threshold = config.mask_threshold;
-        }
+pub fn sync_inox_render_config(mut query: Query<(&InoxRenderConfig, &mut InoxWgpuRenderer)>) {
+	for (config, mut renderer) in &mut query {
+		renderer.0.blend_mode = config.blend_mode;
+		renderer.0.tint = config.tint;
+		renderer.0.emission_strength = config.emission_strength;
+		renderer.0.mask_threshold = config.mask_threshold;
+	}
 }
 
 pub fn update_puppets(
@@ -132,6 +146,7 @@ pub fn update_puppets(
 	render_device: Option<Res<RenderDevice>>,
 	render_queue: Option<Res<RenderQueue>>,
 	mut commands: Commands,
+	mut error_events: EventWriter<RendererInitFailed>,
 	mut query: Query<(Entity, &InoxModelHandle, &mut Transform, Option<&mut InoxWgpuRenderer>)>,
 ) {
 	for (entity, handle, mut transform, renderer) in &mut query {
@@ -139,8 +154,21 @@ pub fn update_puppets(
 			if renderer.is_none() {
 				if let (Some(device), Some(queue)) = (render_device.as_ref(), render_queue.as_ref()) {
 					let wgpu_queue = queue.0.as_ref().clone().into_inner();
-					if let Ok(r) = WgpuRenderer::new(device.wgpu_device().clone(), wgpu_queue, &model.0) {
-						commands.entity(entity).insert(InoxWgpuRenderer(r));
+					match WgpuRenderer::new(device.wgpu_device().clone(), wgpu_queue, &model.0) {
+						Ok(r) => {
+							commands
+								.entity(entity)
+								.insert(InoxWgpuRenderer(r))
+								.remove::<InoxRendererError>();
+						}
+						Err(e) => {
+							error!("failed to create WgpuRenderer: {}", e);
+							error_events.send(RendererInitFailed {
+								entity,
+								error: e.to_string(),
+							});
+							commands.entity(entity).insert(InoxRendererError(e.to_string()));
+						}
 					}
 				}
 			}
