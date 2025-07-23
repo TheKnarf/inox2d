@@ -165,8 +165,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
 		.with_title("Render Inochi2D Puppet (WGPU)")
 		.build(&event_loop)?;
 
-	// Leak the window so the surface can outlive the original binding.
-	let window: &'static Window = Box::leak(Box::new(window));
+        // Leak the window so the surface can outlive the original binding.
+        let window: &'static Window = Box::leak(Box::new(window));
+        // Request the first frame
+        window.request_redraw();
 
 	let alpha_mode = cli.alpha_mode.map(Into::into);
 	let (surface, device, queue, mut surface_config) = init_wgpu(window, alpha_mode).await?;
