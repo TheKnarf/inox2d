@@ -93,9 +93,10 @@ pub struct WgpuRenderer {
 	pub tint: Vec3,
 	pub emission_strength: f32,
 	pub mask_threshold: f32,
-	debug_vertex_buffer: wgpu::Buffer,
-	debug_index_buffer: wgpu::Buffer,
-	debug_pipeline: wgpu::RenderPipeline,
+        debug_vertex_buffer: wgpu::Buffer,
+        debug_index_buffer: wgpu::Buffer,
+        debug_pipeline: wgpu::RenderPipeline,
+        encoder: RefCell<Option<wgpu::CommandEncoder>>,
 }
 
 // WgpuRenderer interacts exclusively with the render thread. The underlying
@@ -623,10 +624,11 @@ impl WgpuRenderer {
 			emission_strength: 1.0,
 			mask_threshold: 0.5,
 			debug_vertex_buffer,
-			debug_index_buffer,
-			debug_pipeline,
-		})
-	}
+                        debug_index_buffer,
+                        debug_pipeline,
+                        encoder: RefCell::new(None),
+                })
+        }
 
 	pub fn resize(&mut self, width: u32, height: u32) {
 		self.viewport = UVec2::new(width, height);
@@ -653,42 +655,39 @@ impl WgpuRenderer {
 		self.target_view.set(view as *const _);
 	}
 
-	pub fn clear(&self) {
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("inox2d_clear"),
-		});
-		{
-			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_clear"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: unsafe { &*self.target_view.get() },
-					resolve_target: None,
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-						store: wgpu::StoreOp::Store,
-					},
-				})],
-				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-					view: &self.stencil_view,
-					depth_ops: None,
-					stencil_ops: Some(wgpu::Operations {
-						load: wgpu::LoadOp::Clear(1),
-						store: wgpu::StoreOp::Store,
-					}),
-				}),
-				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-		}
-		self.queue.submit(Some(encoder.finish()));
-	}
+        pub fn clear(&self, encoder: &mut wgpu::CommandEncoder) {
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("inox2d_clear"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: unsafe { &*self.target_view.get() },
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                        store: wgpu::StoreOp::Store,
+                                },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.stencil_view,
+                                depth_ops: None,
+                                stencil_ops: Some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1),
+                                        store: wgpu::StoreOp::Store,
+                                }),
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                });
+        }
 
-	pub fn on_begin_draw(&self, puppet: &Puppet) {
-		tracing::debug!("Begin draw");
-		self.clear();
-		let mvp = self.camera.matrix(self.viewport.as_vec2());
-		let arr = mvp.to_cols_array();
-		self.queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&arr));
+        pub fn on_begin_draw(&self, puppet: &Puppet) {
+                tracing::debug!("Begin draw");
+                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("inox2d_frame"),
+                });
+                self.clear(&mut encoder);
+                let mvp = self.camera.matrix(self.viewport.as_vec2());
+                let arr = mvp.to_cols_array();
+                self.queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&arr));
 
 		let render_ctx = puppet
 			.render_ctx
@@ -701,12 +700,17 @@ impl WgpuRenderer {
 		for i in 0..verts.len() {
 			vertices.push([verts[i].x, verts[i].y, uvs[i].x, uvs[i].y, deforms[i].x, deforms[i].y]);
 		}
-		self.queue
-			.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
-	}
-	pub fn on_end_draw(&self, _puppet: &Puppet) {
-		tracing::debug!("End draw");
-	}
+                self.queue
+                        .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+
+                *self.encoder.borrow_mut() = Some(encoder);
+        }
+        pub fn on_end_draw(&self, _puppet: &Puppet) {
+                tracing::debug!("End draw");
+                if let Some(encoder) = self.encoder.borrow_mut().take() {
+                        self.queue.submit(Some(encoder.finish()));
+                }
+        }
 
 	pub fn draw_debug_rect(&self) {
 		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -794,16 +798,15 @@ impl InoxRenderer for WgpuRenderer {
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&origin_arr));
 
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("inox2d_pass"),
-		});
-		{
-			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_pass"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: unsafe { &*self.target_view.get() },
-					resolve_target: None,
-					ops: wgpu::Operations {
+                let mut enc_ref = self.encoder.borrow_mut();
+                let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
+                {
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("inox2d_pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: unsafe { &*self.target_view.get() },
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
 						load: wgpu::LoadOp::Load,
 						store: wgpu::StoreOp::Store,
 					},
@@ -817,11 +820,11 @@ impl InoxRenderer for WgpuRenderer {
 					}),
 				}),
 				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-			if as_mask {
-				pass.set_pipeline(&self.mask_pipeline);
-				pass.set_bind_group(2, &self.mask_bg, &[]);
+                                occlusion_query_set: None,
+                        });
+                        if as_mask {
+                                pass.set_pipeline(&self.mask_pipeline);
+                                pass.set_bind_group(2, &self.mask_bg, &[]);
 			} else {
 				let idx = self.blend_mode as usize;
 				pass.set_pipeline(&self.pipelines[idx]);
@@ -875,13 +878,12 @@ impl InoxRenderer for WgpuRenderer {
 					},
 				],
 			});
-			pass.set_bind_group(1, &tex_bg, &[]);
-			let start = render_ctx.index_offset as u32;
-			let end = start + render_ctx.index_len as u32;
-			pass.draw_indexed(start..end, 0, 0..1);
-		}
-		self.queue.submit(Some(encoder.finish()));
-	}
+                        pass.set_bind_group(1, &tex_bg, &[]);
+                        let start = render_ctx.index_offset as u32;
+                        let end = start + render_ctx.index_len as u32;
+                        pass.draw_indexed(start..end, 0, 0..1);
+                }
+        }
 
 	fn begin_composite_content(
 		&self,
@@ -935,16 +937,15 @@ impl InoxRenderer for WgpuRenderer {
 		self.target_view
 			.set(self.composite_view.borrow().as_ref().unwrap() as *const _);
 
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("inox2d_clear_composite"),
-		});
-		{
-			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_clear_composite"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: self.composite_view.borrow().as_ref().unwrap(),
-					resolve_target: None,
-					ops: wgpu::Operations {
+                let mut enc_ref = self.encoder.borrow_mut();
+                let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
+                {
+                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("inox2d_clear_composite"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: self.composite_view.borrow().as_ref().unwrap(),
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
 						load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
 						store: wgpu::StoreOp::Store,
 					},
@@ -958,11 +959,10 @@ impl InoxRenderer for WgpuRenderer {
 					}),
 				}),
 				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-		}
-		self.queue.submit(Some(encoder.finish()));
-	}
+                                occlusion_query_set: None,
+                        });
+                }
+        }
 
 	fn finish_composite_content(
 		&self,
@@ -989,16 +989,15 @@ impl InoxRenderer for WgpuRenderer {
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
 
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("inox2d_composite_blend"),
-		});
-		{
-			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_composite_blend"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: unsafe { &*prev },
-					resolve_target: None,
-					ops: wgpu::Operations {
+                let mut enc_ref = self.encoder.borrow_mut();
+                let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
+                {
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("inox2d_composite_blend"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: unsafe { &*prev },
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
 						load: wgpu::LoadOp::Load,
 						store: wgpu::StoreOp::Store,
 					},
@@ -1012,22 +1011,21 @@ impl InoxRenderer for WgpuRenderer {
 					}),
 				}),
 				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-			pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
-			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                                occlusion_query_set: None,
+                        });
+                        pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 			pass.set_bind_group(0, &self.camera_bg, &[]);
 			pass.set_bind_group(1, &bg, &[]);
 			pass.set_bind_group(2, &self.frag_bg, &[]);
 			pass.set_bind_group(3, &self.transform_bg, &[]);
 			pass.set_bind_group(4, &self.origin_bg, &[]);
 			pass.draw_indexed(0..6, 0, 0..1);
-		}
-		self.queue.submit(Some(encoder.finish()));
+                }
 
-		*self.composite_texture.borrow_mut() = None;
-		*self.composite_view.borrow_mut() = None;
-		*self.composite_bg.borrow_mut() = None;
-	}
+                *self.composite_texture.borrow_mut() = None;
+                *self.composite_view.borrow_mut() = None;
+                *self.composite_bg.borrow_mut() = None;
+        }
 }
