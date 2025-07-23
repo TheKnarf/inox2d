@@ -113,14 +113,16 @@ impl RenderCtx {
 			}
 		}
 
-		let mut root_drawables_zsorted = Vec::new();
-		// similarly, populate later, before render
-		root_drawables_zsorted.resize(root_drawables_count, InoxNodeUuid(0));
+                let root_drawables_zsorted = Vec::with_capacity(root_drawables_count);
 
-		Self {
-			vertex_buffers,
-			root_drawables_zsorted,
-		}
+                let mut ctx = Self {
+                        vertex_buffers,
+                        root_drawables_zsorted,
+                };
+
+                ctx.update(nodes, comps);
+
+                ctx
 	}
 
 	/// Reset all `DeformStack`.
