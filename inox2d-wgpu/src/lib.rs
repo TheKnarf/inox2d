@@ -93,6 +93,9 @@ pub struct WgpuRenderer {
 	pub tint: Vec3,
 	pub emission_strength: f32,
 	pub mask_threshold: f32,
+	debug_vertex_buffer: wgpu::Buffer,
+	debug_index_buffer: wgpu::Buffer,
+	debug_pipeline: wgpu::RenderPipeline,
 }
 
 // WgpuRenderer interacts exclusively with the render thread. The underlying
@@ -531,6 +534,58 @@ impl WgpuRenderer {
 		});
 		let stencil_view = stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+		let dbg_vertices: [[f32; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+		let dbg_indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+		let debug_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("inox2d_debug_verts"),
+			contents: bytemuck::cast_slice(&dbg_vertices),
+			usage: wgpu::BufferUsages::VERTEX,
+		});
+		let debug_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+			label: Some("inox2d_debug_indices"),
+			contents: bytemuck::cast_slice(&dbg_indices),
+			usage: wgpu::BufferUsages::INDEX,
+		});
+
+		let debug_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+			label: Some("inox2d_debug_shader"),
+			source: wgpu::ShaderSource::Wgsl(include_str!("shaders/debug.wgsl").into()),
+		});
+		let debug_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+			label: Some("inox2d_debug_pipeline_layout"),
+			bind_group_layouts: &[],
+			push_constant_ranges: &[],
+		});
+		let debug_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+			label: Some("inox2d_debug_pipeline"),
+			layout: Some(&debug_pipeline_layout),
+			vertex: wgpu::VertexState {
+				module: &debug_shader,
+				entry_point: Some("vs_main"),
+				compilation_options: Default::default(),
+				buffers: &[wgpu::VertexBufferLayout {
+					array_stride: 8,
+					step_mode: wgpu::VertexStepMode::Vertex,
+					attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+				}],
+			},
+			fragment: Some(wgpu::FragmentState {
+				module: &debug_shader,
+				entry_point: Some("fs_main"),
+				compilation_options: Default::default(),
+				targets: &[Some(wgpu::ColorTargetState {
+					format: output_format,
+					blend: Some(wgpu::BlendState::REPLACE),
+					write_mask: wgpu::ColorWrites::ALL,
+				})],
+			}),
+			primitive: wgpu::PrimitiveState::default(),
+			depth_stencil: None,
+			multisample: wgpu::MultisampleState::default(),
+			multiview: None,
+			cache: None,
+		});
+
 		tracing::info!("Inox2D renderer initialized");
 		Ok(Self {
 			device,
@@ -567,6 +622,9 @@ impl WgpuRenderer {
 			tint: Vec3::ONE,
 			emission_strength: 1.0,
 			mask_threshold: 0.5,
+			debug_vertex_buffer,
+			debug_index_buffer,
+			debug_pipeline,
 		})
 	}
 
@@ -591,44 +649,44 @@ impl WgpuRenderer {
 			.create_view(&wgpu::TextureViewDescriptor::default());
 	}
 
-        pub fn set_target_view(&self, view: &wgpu::TextureView) {
-                self.target_view.set(view as *const _);
-        }
+	pub fn set_target_view(&self, view: &wgpu::TextureView) {
+		self.target_view.set(view as *const _);
+	}
 
-        pub fn clear(&self) {
-                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("inox2d_clear"),
-                });
-                {
-                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("inox2d_clear"),
-                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                        view: unsafe { &*self.target_view.get() },
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                                store: wgpu::StoreOp::Store,
-                                        },
-                                })],
-                                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                                        view: &self.stencil_view,
-                                        depth_ops: None,
-                                        stencil_ops: Some(wgpu::Operations {
-                                                load: wgpu::LoadOp::Clear(1),
-                                                store: wgpu::StoreOp::Store,
-                                        }),
-                                }),
-                                timestamp_writes: None,
-                                occlusion_query_set: None,
-                        });
-                }
-                self.queue.submit(Some(encoder.finish()));
-        }
+	pub fn clear(&self) {
+		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+			label: Some("inox2d_clear"),
+		});
+		{
+			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("inox2d_clear"),
+				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+					view: unsafe { &*self.target_view.get() },
+					resolve_target: None,
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+						store: wgpu::StoreOp::Store,
+					},
+				})],
+				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+					view: &self.stencil_view,
+					depth_ops: None,
+					stencil_ops: Some(wgpu::Operations {
+						load: wgpu::LoadOp::Clear(1),
+						store: wgpu::StoreOp::Store,
+					}),
+				}),
+				timestamp_writes: None,
+				occlusion_query_set: None,
+			});
+		}
+		self.queue.submit(Some(encoder.finish()));
+	}
 
-        pub fn on_begin_draw(&self, puppet: &Puppet) {
-                tracing::debug!("Begin draw");
-                self.clear();
-                let mvp = self.camera.matrix(self.viewport.as_vec2());
+	pub fn on_begin_draw(&self, puppet: &Puppet) {
+		tracing::debug!("Begin draw");
+		self.clear();
+		let mvp = self.camera.matrix(self.viewport.as_vec2());
 		let arr = mvp.to_cols_array();
 		self.queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&arr));
 
@@ -648,6 +706,33 @@ impl WgpuRenderer {
 	}
 	pub fn on_end_draw(&self, _puppet: &Puppet) {
 		tracing::debug!("End draw");
+	}
+
+	pub fn draw_debug_rect(&self) {
+		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+			label: Some("inox2d_debug_rect"),
+		});
+		{
+			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("inox2d_debug_rect"),
+				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+					view: unsafe { &*self.target_view.get() },
+					resolve_target: None,
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Load,
+						store: wgpu::StoreOp::Store,
+					},
+				})],
+				depth_stencil_attachment: None,
+				timestamp_writes: None,
+				occlusion_query_set: None,
+			});
+			pass.set_pipeline(&self.debug_pipeline);
+			pass.set_vertex_buffer(0, self.debug_vertex_buffer.slice(..));
+			pass.set_index_buffer(self.debug_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+			pass.draw_indexed(0..6, 0, 0..1);
+		}
+		self.queue.submit(Some(encoder.finish()));
 	}
 }
 
