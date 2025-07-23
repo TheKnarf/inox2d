@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 async fn init_wgpu(
 	window: &Window,
 	requested_mode: Option<wgpu::CompositeAlphaMode>,
+	window_transparent: bool,
 ) -> Result<(Surface, wgpu::Device, wgpu::Queue, SurfaceConfiguration), Box<dyn Error>> {
 	let size = window.inner_size();
 	tracing::debug!("Initializing WGPU with window size: {:?}", size);
@@ -98,7 +99,23 @@ async fn init_wgpu(
 		.copied()
 		.find(|f| f.is_srgb())
 		.unwrap_or(caps.formats[0]);
-	let mut alpha_mode = requested_mode.unwrap_or(caps.alpha_modes[0]);
+	let mut alpha_mode = if let Some(mode) = requested_mode {
+		mode
+	} else if window_transparent {
+		[
+			wgpu::CompositeAlphaMode::PreMultiplied,
+			wgpu::CompositeAlphaMode::PostMultiplied,
+			wgpu::CompositeAlphaMode::Inherit,
+			wgpu::CompositeAlphaMode::Auto,
+		]
+		.iter()
+		.copied()
+		.find(|m| caps.alpha_modes.contains(m))
+		.unwrap_or(caps.alpha_modes[0])
+	} else {
+		caps.alpha_modes[0]
+	};
+
 	if !caps.alpha_modes.contains(&alpha_mode) {
 		tracing::warn!(
 			"Requested alpha mode {:?} not supported, using {:?}",
@@ -108,9 +125,10 @@ async fn init_wgpu(
 		alpha_mode = caps.alpha_modes[0];
 	}
 
-	if alpha_mode == wgpu::CompositeAlphaMode::Opaque {
+	if window_transparent && alpha_mode == wgpu::CompositeAlphaMode::Opaque {
 		tracing::warn!("Window is transparent but alpha mode is Opaque");
 	}
+	tracing::info!("Composite alpha mode selected: {:?}", alpha_mode);
 
 	let config = SurfaceConfiguration {
 		usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -165,13 +183,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
 		.with_title("Render Inochi2D Puppet (WGPU)")
 		.build(&event_loop)?;
 
-        // Leak the window so the surface can outlive the original binding.
-        let window: &'static Window = Box::leak(Box::new(window));
-        // Request the first frame
-        window.request_redraw();
+	// Leak the window so the surface can outlive the original binding.
+	let window: &'static Window = Box::leak(Box::new(window));
+	// Request the first frame
+	window.request_redraw();
 
 	let alpha_mode = cli.alpha_mode.map(Into::into);
-	let (surface, device, queue, mut surface_config) = init_wgpu(window, alpha_mode).await?;
+	let (surface, device, queue, mut surface_config) = init_wgpu(window, alpha_mode, true).await?;
 	// Store the registration so the callback lives for the entire program
 	let _error_callback = device.on_uncaptured_error(Box::new(|e| {
 		tracing::error!("wgpu uncaptured error: {:?}", e);
