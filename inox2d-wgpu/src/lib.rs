@@ -675,9 +675,39 @@ impl WgpuRenderer {
 			.create_view(&wgpu::TextureViewDescriptor::default());
 	}
 
-	pub fn set_target_view(&self, view: &wgpu::TextureView) {
-		self.target_view.set(view as *const _);
-	}
+        pub fn set_target_view(&self, view: &wgpu::TextureView) {
+                self.target_view.set(view as *const _);
+        }
+
+        pub fn copy_target_to_buffer(
+                &self,
+                encoder: &mut wgpu::CommandEncoder,
+                texture: &wgpu::Texture,
+                buffer: &wgpu::Buffer,
+        ) {
+                let bytes_per_row = align_to(4 * self.viewport.x, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+                encoder.copy_texture_to_buffer(
+                        wgpu::ImageCopyTexture {
+                                texture,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d::ZERO,
+                                aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::ImageCopyBuffer {
+                                buffer,
+                                layout: wgpu::ImageDataLayout {
+                                        offset: 0,
+                                        bytes_per_row: Some(bytes_per_row),
+                                        rows_per_image: None,
+                                },
+                        },
+                        wgpu::Extent3d {
+                                width: self.viewport.x,
+                                height: self.viewport.y,
+                                depth_or_array_layers: 1,
+                        },
+                );
+        }
 
 	pub fn clear(&self, encoder: &mut wgpu::CommandEncoder) {
 		encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -801,15 +831,21 @@ impl InoxRenderer for WgpuRenderer {
 		self.stencil_ref.set(1);
 	}
 
-	fn draw_textured_mesh_content(
-		&self,
-		as_mask: bool,
-		components: &TexturedMeshComponents,
-		render_ctx: &TexturedMeshRenderCtx,
-		_id: InoxNodeUuid,
-	) {
-		let mvp = self.camera.matrix(self.viewport.as_vec2()) * *components.transform;
-		let arr = mvp.to_cols_array();
+        fn draw_textured_mesh_content(
+                &self,
+                as_mask: bool,
+                components: &TexturedMeshComponents,
+                render_ctx: &TexturedMeshRenderCtx,
+                _id: InoxNodeUuid,
+        ) {
+                let mvp = self.camera.matrix(self.viewport.as_vec2()) * *components.transform;
+                let arr = mvp.to_cols_array();
+
+                tracing::debug!(
+                        "vertex buffer size: {}, index buffer size: {}",
+                        self.vertex_buffer.size(),
+                        self.index_buffer.size()
+                );
 
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
@@ -902,9 +938,13 @@ impl InoxRenderer for WgpuRenderer {
 				],
 			});
 			pass.set_bind_group(1, &tex_bg, &[]);
-			let start = render_ctx.index_offset as u32;
-			let end = start + render_ctx.index_len as u32;
-			pass.draw_indexed(start..end, 0, 0..1);
+                        let start = render_ctx.index_offset as u32;
+                        let end = start + render_ctx.index_len as u32;
+                        tracing::debug!(
+                            "draw_indexed range: {start:?}..{end:?}, stencil_ref: {}",
+                            self.stencil_ref.get()
+                        );
+                        pass.draw_indexed(start..end, 0, 0..1);
 		}
 	}
 
