@@ -746,9 +746,9 @@ impl InoxRenderer for WgpuRenderer {
 		let threshold = (masks.threshold * self.mask_threshold).clamp(0.0, 1.0);
 		self.queue
 			.write_buffer(&self.mask_buf, 0, bytemuck::bytes_of(&threshold));
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-			label: Some("inox2d_clear_stencil"),
-		});
+
+		let mut enc_ref = self.encoder.borrow_mut();
+		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
 		{
 			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("inox2d_clear_stencil"),
@@ -765,7 +765,6 @@ impl InoxRenderer for WgpuRenderer {
 				occlusion_query_set: None,
 			});
 		}
-		self.queue.submit(Some(encoder.finish()));
 	}
 	fn on_begin_mask(&self, mask: &Mask) {
 		let val = if mask.mode == MaskMode::Mask { 1 } else { 0 };
