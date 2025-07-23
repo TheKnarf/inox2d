@@ -358,12 +358,12 @@ impl WgpuRenderer {
 				count: None,
 			}],
 		});
-                let mask_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("inox2d_mask_buf"),
-                        size: 32,
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                });
+		let mask_buf = device.create_buffer(&wgpu::BufferDescriptor {
+			label: Some("inox2d_mask_buf"),
+			size: 32,
+			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+			mapped_at_creation: false,
+		});
 		let mask_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: Some("inox2d_mask_bg"),
 			layout: &mask_layout,

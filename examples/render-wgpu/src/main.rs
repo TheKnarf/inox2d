@@ -194,6 +194,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 			tracing::debug!("Rendering frame");
 			renderer.on_begin_draw(puppet);
 			if std::env::var("INOX2D_DEBUG_DRAW").is_ok() {
+				tracing::debug!("Debug draw");
 				renderer.draw_debug_rect();
 			}
 			renderer.draw(puppet);
