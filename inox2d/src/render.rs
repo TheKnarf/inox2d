@@ -198,10 +198,10 @@ impl RenderCtx {
 		}
 
 		root_drawable_uuid_zsort_vec.sort_by(|a, b| a.1.total_cmp(&b.1).reverse());
+
+		self.root_drawables_zsorted.clear();
 		self.root_drawables_zsorted
-			.iter_mut()
-			.zip(root_drawable_uuid_zsort_vec.iter())
-			.for_each(|(old, new)| *old = new.0);
+			.extend(root_drawable_uuid_zsort_vec.iter().map(|(uuid, _)| *uuid));
 	}
 }
 
