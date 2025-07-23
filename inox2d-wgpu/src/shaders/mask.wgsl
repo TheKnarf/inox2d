@@ -8,7 +8,7 @@ struct VertexOut {
 
 struct MaskUniform {
     threshold: f32,
-    // Padding to satisfy 16-byte alignment requirements
+    // Padding to satisfy WGSL uniform alignment requirements
     _pad: vec3<f32>,
 };
 @group(2) @binding(0) var<uniform> mask: MaskUniform;
