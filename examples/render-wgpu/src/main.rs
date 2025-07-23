@@ -192,14 +192,14 @@ async fn run() -> Result<(), Box<dyn Error>> {
 			let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 			renderer.set_target_view(&view);
 			tracing::debug!("Rendering frame");
-			renderer.clear();
-			renderer.on_begin_draw(puppet);
+                        renderer.on_begin_draw(puppet);
 			if std::env::var("INOX2D_DEBUG_DRAW").is_ok() {
 				renderer.draw_debug_rect();
 			}
-			renderer.draw(puppet);
-			renderer.on_end_draw(puppet);
-			frame.present();
+                        renderer.draw(puppet);
+                        renderer.on_end_draw(puppet);
+                        device.poll(wgpu::Maintain::Poll);
+                        frame.present();
 			tracing::debug!("Frame presented");
 			window.request_redraw();
 		}
