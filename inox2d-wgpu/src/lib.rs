@@ -16,6 +16,15 @@ use wgpu::util::DeviceExt;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 mod shaders;
 
+fn align_to(value: u32, alignment: u32) -> u32 {
+	let remainder = value % alignment;
+	if remainder == 0 {
+		value
+	} else {
+		value + alignment - remainder
+	}
+}
+
 fn blend_state_for(mode: BlendMode) -> wgpu::BlendState {
 	use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as O};
 	let comp = |src, dst, op| BlendComponent {
@@ -308,6 +317,21 @@ impl WgpuRenderer {
 					usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 					view_formats: &[],
 				});
+
+				// wgpu requires each row written to the GPU to be aligned
+				// to COPY_BYTES_PER_ROW_ALIGNMENT (currently 256 bytes). Pad
+				// the pixel data accordingly before uploading.
+				let bytes_per_row = align_to(4 * tex.width(), wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+				let mut data = vec![0u8; (bytes_per_row * tex.height()) as usize];
+				let row_bytes = (4 * tex.width()) as usize;
+				let pixels = tex.pixels();
+				for row in 0..tex.height() as usize {
+					let src_start = row * row_bytes;
+					let src_end = src_start + row_bytes;
+					let dst_start = row * bytes_per_row as usize;
+					data[dst_start..dst_start + row_bytes].copy_from_slice(&pixels[src_start..src_end]);
+				}
+
 				queue.write_texture(
 					wgpu::TexelCopyTextureInfo {
 						texture: &texture,
@@ -315,10 +339,10 @@ impl WgpuRenderer {
 						origin: wgpu::Origin3d::ZERO,
 						aspect: wgpu::TextureAspect::All,
 					},
-					tex.pixels(),
+					&data,
 					wgpu::TexelCopyBufferLayout {
 						offset: 0,
-						bytes_per_row: Some(4 * tex.width()),
+						bytes_per_row: Some(bytes_per_row),
 						rows_per_image: Some(tex.height()),
 					},
 					size,
