@@ -6,7 +6,11 @@ struct VertexOut {
 @group(1) @binding(0) var samp: sampler;
 @group(1) @binding(1) var tex_albedo: texture_2d<f32>;
 
-struct MaskUniform { threshold: f32, };
+struct MaskUniform {
+    threshold: f32,
+    // Padding to satisfy 16-byte alignment requirements
+    _pad: vec3<f32>,
+};
 @group(2) @binding(0) var<uniform> mask: MaskUniform;
 
 @fragment

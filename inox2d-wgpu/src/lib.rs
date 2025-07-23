@@ -204,12 +204,12 @@ impl WgpuRenderer {
 			}],
 		});
 
-		let origin_buf = device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("inox2d_origin"),
-			size: std::mem::size_of::<[f32; 2]>() as u64,
-			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-			mapped_at_creation: false,
-		});
+                let origin_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("inox2d_origin"),
+                        size: 16,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                });
 		let origin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 			label: Some("inox2d_origin_layout"),
 			entries: &[wgpu::BindGroupLayoutEntry {
@@ -357,12 +357,12 @@ impl WgpuRenderer {
 				count: None,
 			}],
 		});
-		let mask_buf = device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("inox2d_mask_buf"),
-			size: 4,
-			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-			mapped_at_creation: false,
-		});
+                let mask_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("inox2d_mask_buf"),
+                        size: 16,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                });
 		let mask_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: Some("inox2d_mask_bg"),
 			layout: &mask_layout,
