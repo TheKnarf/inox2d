@@ -8,7 +8,7 @@ common = { path = "../common" }
 inox2d = { path = "../../inox2d" }
 inox2d-wgpu = { path = "../../inox2d-wgpu" }
 
-clap = { version = "4.1.8", features = ["derive"] }
+clap = { version = "4.1.8", features = ["derive", "env"] }
 wgpu = "24"
 winit = { version = "0.29", features = ["rwh_05"] }
 glam = { version = "0.29.0", features = ["bytemuck"] }

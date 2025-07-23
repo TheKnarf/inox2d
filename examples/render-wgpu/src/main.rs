@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::{error::Error, fs};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use glam::Vec2;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -16,11 +16,36 @@ use inox2d::formats::inp::parse_inp;
 use inox2d::render::InoxRendererExt;
 use inox2d_wgpu::WgpuRenderer;
 
+#[derive(ValueEnum, Clone, Debug)]
+enum AlphaModeArg {
+        Auto,
+        Opaque,
+        PreMultiplied,
+        PostMultiplied,
+        Inherit,
+}
+
+impl From<AlphaModeArg> for wgpu::CompositeAlphaMode {
+        fn from(value: AlphaModeArg) -> Self {
+                match value {
+                        AlphaModeArg::Auto => wgpu::CompositeAlphaMode::Auto,
+                        AlphaModeArg::Opaque => wgpu::CompositeAlphaMode::Opaque,
+                        AlphaModeArg::PreMultiplied => wgpu::CompositeAlphaMode::PreMultiplied,
+                        AlphaModeArg::PostMultiplied => wgpu::CompositeAlphaMode::PostMultiplied,
+                        AlphaModeArg::Inherit => wgpu::CompositeAlphaMode::Inherit,
+                }
+        }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-	#[arg(help = "Path to the .inp or .inx file.")]
-	inp_path: PathBuf,
+        #[arg(help = "Path to the .inp or .inx file.")]
+        inp_path: PathBuf,
+
+        /// Composite alpha mode to request
+        #[arg(long, env = "INOX2D_ALPHA_MODE")]
+        alpha_mode: Option<AlphaModeArg>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -28,7 +53,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn init_wgpu(
-	window: &Window,
+        window: &Window,
+        requested_mode: Option<wgpu::CompositeAlphaMode>,
 ) -> Result<(Surface, wgpu::Device, wgpu::Queue, SurfaceConfiguration), Box<dyn Error>> {
 	let size = window.inner_size();
 	tracing::debug!("Initializing WGPU with window size: {:?}", size);
@@ -72,16 +98,29 @@ async fn init_wgpu(
 		.copied()
 		.find(|f| f.is_srgb())
 		.unwrap_or(caps.formats[0]);
-	let config = SurfaceConfiguration {
-		usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-		format,
-		width: size.width.max(1),
-		height: size.height.max(1),
-		present_mode: wgpu::PresentMode::Fifo,
-		desired_maximum_frame_latency: 2,
-		alpha_mode: caps.alpha_modes[0],
-		view_formats: vec![],
-	};
+        let mut alpha_mode = requested_mode.unwrap_or(caps.alpha_modes[0]);
+        if !caps.alpha_modes.contains(&alpha_mode) {
+                tracing::warn!(
+                        "Requested alpha mode {:?} not supported, using {:?}",
+                        alpha_mode, caps.alpha_modes[0]
+                );
+                alpha_mode = caps.alpha_modes[0];
+        }
+
+        if alpha_mode == wgpu::CompositeAlphaMode::Opaque {
+                tracing::warn!("Window is transparent but alpha mode is Opaque");
+        }
+
+        let config = SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                width: size.width.max(1),
+                height: size.height.max(1),
+                present_mode: wgpu::PresentMode::Fifo,
+                desired_maximum_frame_latency: 2,
+                alpha_mode,
+                view_formats: vec![],
+        };
 	tracing::debug!("Surface format chosen: {:?}", format);
 	surface.configure(&device, &config);
 	tracing::info!(
@@ -128,7 +167,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
 	// Leak the window so the surface can outlive the original binding.
 	let window: &'static Window = Box::leak(Box::new(window));
 
-	let (surface, device, queue, mut surface_config) = init_wgpu(window).await?;
+        let alpha_mode = cli.alpha_mode.map(Into::into);
+        let (surface, device, queue, mut surface_config) = init_wgpu(window, alpha_mode).await?;
 	// Store the registration so the callback lives for the entire program
 	let _error_callback = device.on_uncaptured_error(Box::new(|e| {
 		tracing::error!("wgpu uncaptured error: {:?}", e);
