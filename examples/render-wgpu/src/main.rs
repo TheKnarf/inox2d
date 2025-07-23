@@ -18,34 +18,34 @@ use inox2d_wgpu::WgpuRenderer;
 
 #[derive(ValueEnum, Clone, Debug)]
 enum AlphaModeArg {
-        Auto,
-        Opaque,
-        PreMultiplied,
-        PostMultiplied,
-        Inherit,
+	Auto,
+	Opaque,
+	PreMultiplied,
+	PostMultiplied,
+	Inherit,
 }
 
 impl From<AlphaModeArg> for wgpu::CompositeAlphaMode {
-        fn from(value: AlphaModeArg) -> Self {
-                match value {
-                        AlphaModeArg::Auto => wgpu::CompositeAlphaMode::Auto,
-                        AlphaModeArg::Opaque => wgpu::CompositeAlphaMode::Opaque,
-                        AlphaModeArg::PreMultiplied => wgpu::CompositeAlphaMode::PreMultiplied,
-                        AlphaModeArg::PostMultiplied => wgpu::CompositeAlphaMode::PostMultiplied,
-                        AlphaModeArg::Inherit => wgpu::CompositeAlphaMode::Inherit,
-                }
-        }
+	fn from(value: AlphaModeArg) -> Self {
+		match value {
+			AlphaModeArg::Auto => wgpu::CompositeAlphaMode::Auto,
+			AlphaModeArg::Opaque => wgpu::CompositeAlphaMode::Opaque,
+			AlphaModeArg::PreMultiplied => wgpu::CompositeAlphaMode::PreMultiplied,
+			AlphaModeArg::PostMultiplied => wgpu::CompositeAlphaMode::PostMultiplied,
+			AlphaModeArg::Inherit => wgpu::CompositeAlphaMode::Inherit,
+		}
+	}
 }
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-        #[arg(help = "Path to the .inp or .inx file.")]
-        inp_path: PathBuf,
+	#[arg(help = "Path to the .inp or .inx file.")]
+	inp_path: PathBuf,
 
-        /// Composite alpha mode to request
-        #[arg(long, env = "INOX2D_ALPHA_MODE")]
-        alpha_mode: Option<AlphaModeArg>,
+	/// Composite alpha mode to request
+	#[arg(long, env = "INOX2D_ALPHA_MODE")]
+	alpha_mode: Option<AlphaModeArg>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -53,8 +53,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn init_wgpu(
-        window: &Window,
-        requested_mode: Option<wgpu::CompositeAlphaMode>,
+	window: &Window,
+	requested_mode: Option<wgpu::CompositeAlphaMode>,
 ) -> Result<(Surface, wgpu::Device, wgpu::Queue, SurfaceConfiguration), Box<dyn Error>> {
 	let size = window.inner_size();
 	tracing::debug!("Initializing WGPU with window size: {:?}", size);
@@ -98,29 +98,30 @@ async fn init_wgpu(
 		.copied()
 		.find(|f| f.is_srgb())
 		.unwrap_or(caps.formats[0]);
-        let mut alpha_mode = requested_mode.unwrap_or(caps.alpha_modes[0]);
-        if !caps.alpha_modes.contains(&alpha_mode) {
-                tracing::warn!(
-                        "Requested alpha mode {:?} not supported, using {:?}",
-                        alpha_mode, caps.alpha_modes[0]
-                );
-                alpha_mode = caps.alpha_modes[0];
-        }
+	let mut alpha_mode = requested_mode.unwrap_or(caps.alpha_modes[0]);
+	if !caps.alpha_modes.contains(&alpha_mode) {
+		tracing::warn!(
+			"Requested alpha mode {:?} not supported, using {:?}",
+			alpha_mode,
+			caps.alpha_modes[0]
+		);
+		alpha_mode = caps.alpha_modes[0];
+	}
 
-        if alpha_mode == wgpu::CompositeAlphaMode::Opaque {
-                tracing::warn!("Window is transparent but alpha mode is Opaque");
-        }
+	if alpha_mode == wgpu::CompositeAlphaMode::Opaque {
+		tracing::warn!("Window is transparent but alpha mode is Opaque");
+	}
 
-        let config = SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format,
-                width: size.width.max(1),
-                height: size.height.max(1),
-                present_mode: wgpu::PresentMode::Fifo,
-                desired_maximum_frame_latency: 2,
-                alpha_mode,
-                view_formats: vec![],
-        };
+	let config = SurfaceConfiguration {
+		usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+		format,
+		width: size.width.max(1),
+		height: size.height.max(1),
+		present_mode: wgpu::PresentMode::Fifo,
+		desired_maximum_frame_latency: 2,
+		alpha_mode,
+		view_formats: vec![],
+	};
 	tracing::debug!("Surface format chosen: {:?}", format);
 	surface.configure(&device, &config);
 	tracing::info!(
@@ -167,8 +168,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
 	// Leak the window so the surface can outlive the original binding.
 	let window: &'static Window = Box::leak(Box::new(window));
 
-        let alpha_mode = cli.alpha_mode.map(Into::into);
-        let (surface, device, queue, mut surface_config) = init_wgpu(window, alpha_mode).await?;
+	let alpha_mode = cli.alpha_mode.map(Into::into);
+	let (surface, device, queue, mut surface_config) = init_wgpu(window, alpha_mode).await?;
 	// Store the registration so the callback lives for the entire program
 	let _error_callback = device.on_uncaptured_error(Box::new(|e| {
 		tracing::error!("wgpu uncaptured error: {:?}", e);
@@ -200,10 +201,41 @@ async fn run() -> Result<(), Box<dyn Error>> {
 					},
 				..
 			} => elwt.exit(),
+			WindowEvent::RedrawRequested => {
+				tracing::debug!("RedrawRequested - drawing frame");
+
+				let frame = match surface.get_current_texture() {
+					Ok(f) => f,
+					Err(wgpu::SurfaceError::Outdated) => {
+						surface.configure(&device, &surface_config);
+						surface.get_current_texture().unwrap()
+					}
+					Err(e) => {
+						tracing::error!("Surface error: {:?}", e);
+						elwt.exit();
+						return;
+					}
+				};
+				let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+				renderer.set_target_view(&view);
+				tracing::debug!("Rendering frame");
+				let puppet = &mut model.puppet;
+				renderer.on_begin_draw(puppet);
+				if std::env::var("INOX2D_DEBUG_DRAW").is_ok() {
+					tracing::debug!("Debug draw");
+					renderer.draw_debug_rect();
+				}
+				renderer.draw(puppet);
+				renderer.on_end_draw(puppet);
+				device.poll(wgpu::Maintain::Poll);
+				frame.present();
+				tracing::debug!("Frame presented");
+				window.request_redraw();
+			}
 			e => scene_ctrl.interact(&e, &renderer.camera),
 		},
 		Event::AboutToWait => {
-			tracing::debug!("AboutToWait - beginning frame");
+			tracing::debug!("AboutToWait - update scene");
 			scene_ctrl.update(&mut renderer.camera);
 
 			let puppet = &mut model.puppet;
@@ -215,34 +247,6 @@ async fn run() -> Result<(), Box<dyn Error>> {
 				.unwrap()
 				.set("Head:: Yaw-Pitch", Vec2::new(t.cos(), t.sin()));
 			puppet.end_frame(scene_ctrl.dt());
-
-			let frame = match surface.get_current_texture() {
-				Ok(f) => f,
-				Err(wgpu::SurfaceError::Outdated) => {
-					surface.configure(&device, &surface_config);
-					surface.get_current_texture().unwrap()
-				}
-				Err(e) => {
-					tracing::error!("Surface error: {:?}", e);
-					elwt.exit();
-					return;
-				}
-			};
-			tracing::debug!("Acquired frame for drawing");
-			let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-			renderer.set_target_view(&view);
-			tracing::debug!("Rendering frame");
-			renderer.on_begin_draw(puppet);
-			if std::env::var("INOX2D_DEBUG_DRAW").is_ok() {
-				tracing::debug!("Debug draw");
-				renderer.draw_debug_rect();
-			}
-			renderer.draw(puppet);
-			renderer.on_end_draw(puppet);
-			device.poll(wgpu::Maintain::Poll);
-			frame.present();
-			tracing::debug!("Frame presented");
-			window.request_redraw();
 		}
 		_ => {}
 	})?;
