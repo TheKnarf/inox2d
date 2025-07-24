@@ -87,8 +87,8 @@ pub struct WgpuRenderer {
 	pipelines: Vec<wgpu::RenderPipeline>,
 	mask_pipeline: wgpu::RenderPipeline,
 	stencil_ref: Cell<u32>,
-        textures: Vec<wgpu::Texture>,
-        texture_views: Vec<wgpu::TextureView>,
+	textures: Vec<wgpu::Texture>,
+	texture_views: Vec<wgpu::TextureView>,
 	composite_texture: RefCell<Option<wgpu::Texture>>,
 	composite_view: RefCell<Option<wgpu::TextureView>>,
 	composite_bg: RefCell<Option<wgpu::BindGroup>>,
@@ -300,60 +300,60 @@ impl WgpuRenderer {
 			}],
 		});
 
-                let decoded = decode_model_textures(model.textures.iter());
-                let mut textures = Vec::with_capacity(decoded.len());
-                let mut texture_views = Vec::with_capacity(decoded.len());
-                for tex in decoded.iter() {
-                                let size = wgpu::Extent3d {
-                                        width: tex.width(),
-                                        height: tex.height(),
-                                        depth_or_array_layers: 1,
-                                };
-                                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                                        label: Some("inox2d_texture"),
-                                        size,
-                                        mip_level_count: 1,
-                                        sample_count: 1,
-                                        dimension: wgpu::TextureDimension::D2,
-                                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                                        view_formats: &[],
-                                });
+		let decoded = decode_model_textures(model.textures.iter());
+		let mut textures = Vec::with_capacity(decoded.len());
+		let mut texture_views = Vec::with_capacity(decoded.len());
+		for tex in decoded.iter() {
+			let size = wgpu::Extent3d {
+				width: tex.width(),
+				height: tex.height(),
+				depth_or_array_layers: 1,
+			};
+			let texture = device.create_texture(&wgpu::TextureDescriptor {
+				label: Some("inox2d_texture"),
+				size,
+				mip_level_count: 1,
+				sample_count: 1,
+				dimension: wgpu::TextureDimension::D2,
+				format: wgpu::TextureFormat::Rgba8UnormSrgb,
+				usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+				view_formats: &[],
+			});
 
-				// wgpu requires each row written to the GPU to be aligned
-				// to COPY_BYTES_PER_ROW_ALIGNMENT (currently 256 bytes). Pad
-				// the pixel data accordingly before uploading.
-				let bytes_per_row = align_to(4 * tex.width(), wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-				let mut data = vec![0u8; (bytes_per_row * tex.height()) as usize];
-				let row_bytes = (4 * tex.width()) as usize;
-				let pixels = tex.pixels();
-				for row in 0..tex.height() as usize {
-					let src_start = row * row_bytes;
-					let src_end = src_start + row_bytes;
-					let dst_start = row * bytes_per_row as usize;
-					data[dst_start..dst_start + row_bytes].copy_from_slice(&pixels[src_start..src_end]);
-				}
+			// wgpu requires each row written to the GPU to be aligned
+			// to COPY_BYTES_PER_ROW_ALIGNMENT (currently 256 bytes). Pad
+			// the pixel data accordingly before uploading.
+			let bytes_per_row = align_to(4 * tex.width(), wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+			let mut data = vec![0u8; (bytes_per_row * tex.height()) as usize];
+			let row_bytes = (4 * tex.width()) as usize;
+			let pixels = tex.pixels();
+			for row in 0..tex.height() as usize {
+				let src_start = row * row_bytes;
+				let src_end = src_start + row_bytes;
+				let dst_start = row * bytes_per_row as usize;
+				data[dst_start..dst_start + row_bytes].copy_from_slice(&pixels[src_start..src_end]);
+			}
 
-				queue.write_texture(
-					wgpu::TexelCopyTextureInfo {
-						texture: &texture,
-						mip_level: 0,
-						origin: wgpu::Origin3d::ZERO,
-						aspect: wgpu::TextureAspect::All,
-					},
-					&data,
-					wgpu::TexelCopyBufferLayout {
-						offset: 0,
-						bytes_per_row: Some(bytes_per_row),
-						rows_per_image: Some(tex.height()),
-					},
-					size,
-				);
-                                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                                textures.push(texture);
-                                texture_views.push(view);
-                }
-                tracing::debug!("Loaded {} textures", texture_views.len());
+			queue.write_texture(
+				wgpu::TexelCopyTextureInfo {
+					texture: &texture,
+					mip_level: 0,
+					origin: wgpu::Origin3d::ZERO,
+					aspect: wgpu::TextureAspect::All,
+				},
+				&data,
+				wgpu::TexelCopyBufferLayout {
+					offset: 0,
+					bytes_per_row: Some(bytes_per_row),
+					rows_per_image: Some(tex.height()),
+				},
+				size,
+			);
+			let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+			textures.push(texture);
+			texture_views.push(view);
+		}
+		tracing::debug!("Loaded {} textures", texture_views.len());
 
 		let frag_buf = device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("inox2d_frag_buf"),
@@ -633,8 +633,8 @@ impl WgpuRenderer {
 			pipelines,
 			mask_pipeline,
 			stencil_ref: Cell::new(1),
-                        textures,
-                        texture_views,
+			textures,
+			texture_views,
 			composite_texture: RefCell::new(None),
 			composite_view: RefCell::new(None),
 			composite_bg: RefCell::new(None),
@@ -677,39 +677,39 @@ impl WgpuRenderer {
 			.create_view(&wgpu::TextureViewDescriptor::default());
 	}
 
-        pub fn set_target_view(&self, view: &wgpu::TextureView) {
-                self.target_view.set(view as *const _);
-        }
+	pub fn set_target_view(&self, view: &wgpu::TextureView) {
+		self.target_view.set(view as *const _);
+	}
 
-        pub fn copy_target_to_buffer(
-                &self,
-                encoder: &mut wgpu::CommandEncoder,
-                texture: &wgpu::Texture,
-                buffer: &wgpu::Buffer,
-        ) {
-                let bytes_per_row = align_to(4 * self.viewport.x, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-                encoder.copy_texture_to_buffer(
-                        wgpu::ImageCopyTexture {
-                                texture,
-                                mip_level: 0,
-                                origin: wgpu::Origin3d::ZERO,
-                                aspect: wgpu::TextureAspect::All,
-                        },
-                        wgpu::ImageCopyBuffer {
-                                buffer,
-                                layout: wgpu::ImageDataLayout {
-                                        offset: 0,
-                                        bytes_per_row: Some(bytes_per_row),
-                                        rows_per_image: None,
-                                },
-                        },
-                        wgpu::Extent3d {
-                                width: self.viewport.x,
-                                height: self.viewport.y,
-                                depth_or_array_layers: 1,
-                        },
-                );
-        }
+	pub fn copy_target_to_buffer(
+		&self,
+		encoder: &mut wgpu::CommandEncoder,
+		texture: &wgpu::Texture,
+		buffer: &wgpu::Buffer,
+	) {
+		let bytes_per_row = align_to(4 * self.viewport.x, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+		encoder.copy_texture_to_buffer(
+			wgpu::ImageCopyTexture {
+				texture,
+				mip_level: 0,
+				origin: wgpu::Origin3d::ZERO,
+				aspect: wgpu::TextureAspect::All,
+			},
+			wgpu::ImageCopyBuffer {
+				buffer,
+				layout: wgpu::ImageDataLayout {
+					offset: 0,
+					bytes_per_row: Some(bytes_per_row),
+					rows_per_image: None,
+				},
+			},
+			wgpu::Extent3d {
+				width: self.viewport.x,
+				height: self.viewport.y,
+				depth_or_array_layers: 1,
+			},
+		);
+	}
 
 	pub fn clear(&self, encoder: &mut wgpu::CommandEncoder) {
 		encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -833,21 +833,20 @@ impl InoxRenderer for WgpuRenderer {
 		self.stencil_ref.set(1);
 	}
 
-        fn draw_textured_mesh_content(
-                &self,
-                as_mask: bool,
-                components: &TexturedMeshComponents,
-                render_ctx: &TexturedMeshRenderCtx,
-                _id: InoxNodeUuid,
-        ) {
-                let mvp = self.camera.matrix(self.viewport.as_vec2()) * *components.transform;
-                let arr = mvp.to_cols_array();
+	fn draw_textured_mesh_content(
+		&self,
+		as_mask: bool,
+		components: &TexturedMeshComponents,
+		render_ctx: &TexturedMeshRenderCtx,
+		_id: InoxNodeUuid,
+	) {
+		let arr = components.transform.to_cols_array();
 
-                tracing::debug!(
-                        "vertex buffer size: {}, index buffer size: {}",
-                        self.vertex_buffer.size(),
-                        self.index_buffer.size()
-                );
+		tracing::debug!(
+			"vertex buffer size: {}, index buffer size: {}",
+			self.vertex_buffer.size(),
+			self.index_buffer.size()
+		);
 
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
@@ -925,28 +924,28 @@ impl InoxRenderer for WgpuRenderer {
 						binding: 0,
 						resource: wgpu::BindingResource::Sampler(&self.sampler),
 					},
-                                        wgpu::BindGroupEntry {
-                                                binding: 1,
-                                                resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                                binding: 2,
-                                                resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
-                                        },
-                                        wgpu::BindGroupEntry {
-                                                binding: 3,
-                                                resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
-                                        },
+					wgpu::BindGroupEntry {
+						binding: 1,
+						resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
+					},
+					wgpu::BindGroupEntry {
+						binding: 2,
+						resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
+					},
+					wgpu::BindGroupEntry {
+						binding: 3,
+						resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
+					},
 				],
 			});
 			pass.set_bind_group(1, &tex_bg, &[]);
-                        let start = render_ctx.index_offset as u32;
-                        let end = start + render_ctx.index_len as u32;
-                        tracing::debug!(
-                            "draw_indexed range: {start:?}..{end:?}, stencil_ref: {}",
-                            self.stencil_ref.get()
-                        );
-                        pass.draw_indexed(start..end, 0, 0..1);
+			let start = render_ctx.index_offset as u32;
+			let end = start + render_ctx.index_len as u32;
+			tracing::debug!(
+				"draw_indexed range: {start:?}..{end:?}, stencil_ref: {}",
+				self.stencil_ref.get()
+			);
+			pass.draw_indexed(start..end, 0, 0..1);
 		}
 	}
 
@@ -1046,8 +1045,7 @@ impl InoxRenderer for WgpuRenderer {
 		let prev = self.prev_target_view.get();
 		self.target_view.set(prev);
 
-		let mvp = self.camera.matrix(self.viewport.as_vec2()) * *components.transform;
-		let arr = mvp.to_cols_array();
+		let arr = components.transform.to_cols_array();
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
 		let zero = [0.0f32, 0.0f32];

@@ -28,7 +28,7 @@ struct FragUniform {
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.pos = transform.mvp * vec4<f32>(v.pos - origin.origin + v.deform, 0.0, 1.0);
+    out.pos = camera.mvp * transform.mvp * vec4<f32>(v.pos - origin.origin + v.deform, 0.0, 1.0);
     out.uv = v.uv;
     return out;
 }
