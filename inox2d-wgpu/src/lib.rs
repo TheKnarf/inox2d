@@ -87,7 +87,8 @@ pub struct WgpuRenderer {
 	pipelines: Vec<wgpu::RenderPipeline>,
 	mask_pipeline: wgpu::RenderPipeline,
 	stencil_ref: Cell<u32>,
-	textures: Vec<wgpu::TextureView>,
+        textures: Vec<wgpu::Texture>,
+        texture_views: Vec<wgpu::TextureView>,
 	composite_texture: RefCell<Option<wgpu::Texture>>,
 	composite_view: RefCell<Option<wgpu::TextureView>>,
 	composite_bg: RefCell<Option<wgpu::BindGroup>>,
@@ -299,24 +300,25 @@ impl WgpuRenderer {
 			}],
 		});
 
-		let textures = decode_model_textures(model.textures.iter())
-			.iter()
-			.map(|tex| {
-				let size = wgpu::Extent3d {
-					width: tex.width(),
-					height: tex.height(),
-					depth_or_array_layers: 1,
-				};
-				let texture = device.create_texture(&wgpu::TextureDescriptor {
-					label: Some("inox2d_texture"),
-					size,
-					mip_level_count: 1,
-					sample_count: 1,
-					dimension: wgpu::TextureDimension::D2,
-					format: wgpu::TextureFormat::Rgba8UnormSrgb,
-					usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-					view_formats: &[],
-				});
+                let decoded = decode_model_textures(model.textures.iter());
+                let mut textures = Vec::with_capacity(decoded.len());
+                let mut texture_views = Vec::with_capacity(decoded.len());
+                for tex in decoded.iter() {
+                                let size = wgpu::Extent3d {
+                                        width: tex.width(),
+                                        height: tex.height(),
+                                        depth_or_array_layers: 1,
+                                };
+                                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                                        label: Some("inox2d_texture"),
+                                        size,
+                                        mip_level_count: 1,
+                                        sample_count: 1,
+                                        dimension: wgpu::TextureDimension::D2,
+                                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                                        view_formats: &[],
+                                });
 
 				// wgpu requires each row written to the GPU to be aligned
 				// to COPY_BYTES_PER_ROW_ALIGNMENT (currently 256 bytes). Pad
@@ -347,12 +349,11 @@ impl WgpuRenderer {
 					},
 					size,
 				);
-				let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-				// keep sampler separate, bind groups created per draw
-				view
-			})
-			.collect::<Vec<_>>();
-		tracing::debug!("Loaded {} textures", textures.len());
+                                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                                textures.push(texture);
+                                texture_views.push(view);
+                }
+                tracing::debug!("Loaded {} textures", texture_views.len());
 
 		let frag_buf = device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("inox2d_frag_buf"),
@@ -632,7 +633,8 @@ impl WgpuRenderer {
 			pipelines,
 			mask_pipeline,
 			stencil_ref: Cell::new(1),
-			textures,
+                        textures,
+                        texture_views,
 			composite_texture: RefCell::new(None),
 			composite_view: RefCell::new(None),
 			composite_bg: RefCell::new(None),
@@ -923,18 +925,18 @@ impl InoxRenderer for WgpuRenderer {
 						binding: 0,
 						resource: wgpu::BindingResource::Sampler(&self.sampler),
 					},
-					wgpu::BindGroupEntry {
-						binding: 1,
-						resource: wgpu::BindingResource::TextureView(&self.textures[albedo]),
-					},
-					wgpu::BindGroupEntry {
-						binding: 2,
-						resource: wgpu::BindingResource::TextureView(&self.textures[emissive]),
-					},
-					wgpu::BindGroupEntry {
-						binding: 3,
-						resource: wgpu::BindingResource::TextureView(&self.textures[bump]),
-					},
+                                        wgpu::BindGroupEntry {
+                                                binding: 1,
+                                                resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                                binding: 2,
+                                                resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                                binding: 3,
+                                                resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
+                                        },
 				],
 			});
 			pass.set_bind_group(1, &tex_bg, &[]);
