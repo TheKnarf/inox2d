@@ -130,16 +130,17 @@ async fn init_wgpu(
 	}
 	tracing::info!("Composite alpha mode selected: {:?}", alpha_mode);
 
-	let config = SurfaceConfiguration {
-		usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-		format,
-		width: size.width.max(1),
-		height: size.height.max(1),
-		present_mode: wgpu::PresentMode::Fifo,
-		desired_maximum_frame_latency: 2,
-		alpha_mode,
-		view_formats: vec![],
-	};
+        let config = SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                width: size.width.max(1),
+                height: size.height.max(1),
+                present_mode: wgpu::PresentMode::Fifo,
+                desired_maximum_frame_latency: 2,
+                alpha_mode,
+                // Allow creating texture views using the surface format
+                view_formats: vec![format],
+        };
 	tracing::debug!("Surface format chosen: {:?}", format);
 	surface.configure(&device, &config);
 	tracing::info!(
