@@ -850,11 +850,11 @@ impl InoxRenderer for WgpuRenderer {
 
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
-		let zero = [0.0f32, 0.0f32];
+		let zero = [0.0f32, 0.0f32, 0.0f32, 0.0f32];
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
 		let origin = components.mesh.origin;
-		let origin_arr = [origin.x, origin.y];
+		let origin_arr = [origin.x, origin.y, 0.0, 0.0];
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&origin_arr));
 
@@ -1048,7 +1048,7 @@ impl InoxRenderer for WgpuRenderer {
 		let arr = components.transform.to_cols_array();
 		self.queue
 			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
-		let zero = [0.0f32, 0.0f32];
+		let zero = [0.0f32, 0.0f32, 0.0f32, 0.0f32];
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
 
