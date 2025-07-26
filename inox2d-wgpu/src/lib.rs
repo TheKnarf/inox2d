@@ -542,18 +542,18 @@ impl WgpuRenderer {
 				depth_write_enabled: false,
 				depth_compare: wgpu::CompareFunction::Always,
 				stencil: wgpu::StencilState {
-					front: wgpu::StencilFaceState {
-						compare: wgpu::CompareFunction::Always,
-						fail_op: wgpu::StencilOperation::Replace,
-						depth_fail_op: wgpu::StencilOperation::Replace,
-						pass_op: wgpu::StencilOperation::Replace,
-					},
-					back: wgpu::StencilFaceState {
-						compare: wgpu::CompareFunction::Always,
-						fail_op: wgpu::StencilOperation::Replace,
-						depth_fail_op: wgpu::StencilOperation::Replace,
-						pass_op: wgpu::StencilOperation::Replace,
-					},
+                                        front: wgpu::StencilFaceState {
+                                                compare: wgpu::CompareFunction::Always,
+                                                fail_op: wgpu::StencilOperation::Keep,
+                                                depth_fail_op: wgpu::StencilOperation::Keep,
+                                                pass_op: wgpu::StencilOperation::Replace,
+                                        },
+                                        back: wgpu::StencilFaceState {
+                                                compare: wgpu::CompareFunction::Always,
+                                                fail_op: wgpu::StencilOperation::Keep,
+                                                depth_fail_op: wgpu::StencilOperation::Keep,
+                                                pass_op: wgpu::StencilOperation::Replace,
+                                        },
 					read_mask: 0xff,
 					write_mask: 0xff,
 				},
