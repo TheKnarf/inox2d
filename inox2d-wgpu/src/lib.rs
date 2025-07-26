@@ -91,14 +91,17 @@ pub struct WgpuRenderer {
 	stencil_ref: Cell<u32>,
 	textures: Vec<wgpu::Texture>,
 	texture_views: Vec<wgpu::TextureView>,
-	composite_texture: RefCell<Option<wgpu::Texture>>,
-	composite_view: RefCell<Option<wgpu::TextureView>>,
-	composite_bg: RefCell<Option<wgpu::BindGroup>>,
-	prev_target_view: Cell<*const wgpu::TextureView>,
-	stencil_texture: wgpu::Texture,
-	stencil_view: wgpu::TextureView,
-	target_view: Cell<*const wgpu::TextureView>,
-	output_format: wgpu::TextureFormat,
+        composite_texture: RefCell<Option<wgpu::Texture>>,
+        composite_view: RefCell<Option<wgpu::TextureView>>,
+        composite_bg: RefCell<Option<wgpu::BindGroup>>,
+        prev_target_view: Cell<*const wgpu::TextureView>,
+        stencil_texture: wgpu::Texture,
+        stencil_view: wgpu::TextureView,
+        offscreen_texture: wgpu::Texture,
+        offscreen_view: wgpu::TextureView,
+        using_offscreen: Cell<bool>,
+        target_view: Cell<*const wgpu::TextureView>,
+        output_format: wgpu::TextureFormat,
 	pub camera: Camera,
 	pub viewport: UVec2,
 	pub blend_mode: BlendMode,
@@ -615,10 +618,28 @@ impl WgpuRenderer {
 		});
 
 		tracing::info!("Inox2D renderer initialized");
-		Ok(Self {
-			device,
-			queue,
-			vertex_buffer,
+                let offscreen_texture = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("inox2d_offscreen"),
+                        size: wgpu::Extent3d {
+                                width: 1,
+                                height: 1,
+                                depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: output_format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                });
+                let offscreen_view = offscreen_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                let renderer = Self {
+                        device,
+                        queue,
+                        vertex_buffer,
 			index_buffer,
 			camera_buf,
 			camera_bg,
@@ -639,14 +660,17 @@ impl WgpuRenderer {
 			texture_views,
 			composite_texture: RefCell::new(None),
 			composite_view: RefCell::new(None),
-			composite_bg: RefCell::new(None),
-			prev_target_view: Cell::new(core::ptr::null()),
-			stencil_texture,
-			stencil_view,
-			target_view: Cell::new(core::ptr::null()),
-			output_format,
-			camera: Camera::default(),
-			viewport: UVec2::ZERO,
+                        composite_bg: RefCell::new(None),
+                        prev_target_view: Cell::new(core::ptr::null()),
+                        stencil_texture,
+                        stencil_view,
+                        offscreen_texture,
+                        offscreen_view,
+                        using_offscreen: Cell::new(true),
+                        target_view: Cell::new(core::ptr::null()),
+                        output_format,
+                        camera: Camera::default(),
+                        viewport: UVec2::ZERO,
 			blend_mode: BlendMode::Normal,
 			tint: Vec3::ONE,
 			emission_strength: 1.0,
@@ -654,13 +678,15 @@ impl WgpuRenderer {
 			debug_vertex_buffer,
 			debug_index_buffer,
 			debug_pipeline,
-			encoder: RefCell::new(None),
-		})
-	}
+                        encoder: RefCell::new(None),
+                };
+                renderer.target_view.set(&renderer.offscreen_view as *const _);
+                Ok(renderer)
+        }
 
-	pub fn resize(&mut self, width: u32, height: u32) {
-		self.viewport = UVec2::new(width, height);
-		self.stencil_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+        pub fn resize(&mut self, width: u32, height: u32) {
+                self.viewport = UVec2::new(width, height);
+                self.stencil_texture = self.device.create_texture(&wgpu::TextureDescriptor {
 			label: Some("inox2d_stencil"),
 			size: wgpu::Extent3d {
 				width,
@@ -672,16 +698,46 @@ impl WgpuRenderer {
 			dimension: wgpu::TextureDimension::D2,
 			format: DEPTH_FORMAT,
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			view_formats: &[],
-		});
-		self.stencil_view = self
-			.stencil_texture
-			.create_view(&wgpu::TextureViewDescriptor::default());
-	}
+                        view_formats: &[],
+                });
+                self.stencil_view = self
+                        .stencil_texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
 
-	pub fn set_target_view(&self, view: &wgpu::TextureView) {
-		self.target_view.set(view as *const _);
-	}
+                self.offscreen_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("inox2d_offscreen"),
+                        size: wgpu::Extent3d {
+                                width: width.max(1),
+                                height: height.max(1),
+                                depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.output_format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                });
+                self.offscreen_view = self
+                        .offscreen_texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                if self.using_offscreen.get() || self.target_view.get().is_null() {
+                        self.target_view.set(&self.offscreen_view as *const _);
+                        self.using_offscreen.set(true);
+                }
+        }
+
+        pub fn set_target_view(&self, view: &wgpu::TextureView) {
+                self.target_view.set(view as *const _);
+                self.using_offscreen.set(false);
+        }
+
+        pub fn target_view(&self) -> &wgpu::TextureView {
+                unsafe { &*self.target_view.get() }
+        }
 
 	pub fn copy_target_to_buffer(
 		&self,
