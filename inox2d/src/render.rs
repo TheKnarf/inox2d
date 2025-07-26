@@ -113,16 +113,16 @@ impl RenderCtx {
 			}
 		}
 
-                let root_drawables_zsorted = Vec::with_capacity(root_drawables_count);
+		let root_drawables_zsorted = Vec::with_capacity(root_drawables_count);
 
-                let mut ctx = Self {
-                        vertex_buffers,
-                        root_drawables_zsorted,
-                };
+		let mut ctx = Self {
+			vertex_buffers,
+			root_drawables_zsorted,
+		};
 
-                ctx.update(nodes, comps);
+		ctx.update(nodes, comps);
 
-                ctx
+		ctx
 	}
 
 	/// Reset all `DeformStack`.
