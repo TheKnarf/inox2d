@@ -10,6 +10,7 @@ use inox2d::puppet::Puppet;
 use inox2d::render::{CompositeRenderCtx, InoxRenderer, TexturedMeshRenderCtx};
 use inox2d::texture::decode_model_textures;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -91,6 +92,7 @@ pub struct WgpuRenderer {
 	stencil_ref: Cell<u32>,
 	textures: Vec<wgpu::Texture>,
 	texture_views: Vec<wgpu::TextureView>,
+	texture_bind_groups: RefCell<HashMap<(usize, usize, usize), wgpu::BindGroup>>,
 	composite_texture: RefCell<Option<wgpu::Texture>>,
 	composite_view: RefCell<Option<wgpu::TextureView>>,
 	composite_bg: RefCell<Option<wgpu::BindGroup>>,
@@ -376,6 +378,8 @@ impl WgpuRenderer {
 			texture_views.push(view);
 		}
 		tracing::debug!("Loaded {} textures", texture_views.len());
+
+		let texture_bind_groups = RefCell::new(HashMap::new());
 
 		let frag_buf = device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("inox2d_frag_buf"),
@@ -675,6 +679,7 @@ impl WgpuRenderer {
 			stencil_ref: Cell::new(1),
 			textures,
 			texture_views,
+			texture_bind_groups,
 			composite_texture: RefCell::new(None),
 			composite_view: RefCell::new(None),
 			composite_bg: RefCell::new(None),
@@ -1023,29 +1028,33 @@ impl InoxRenderer for WgpuRenderer {
 		let albedo = components.texture.tex_albedo.raw();
 		let emissive = components.texture.tex_emissive.raw();
 		let bump = components.texture.tex_bumpmap.raw();
-		let tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-			label: Some("inox2d_texture_set"),
-			layout: &self.texture_layout,
-			entries: &[
-				wgpu::BindGroupEntry {
-					binding: 0,
-					resource: wgpu::BindingResource::Sampler(&self.sampler),
-				},
-				wgpu::BindGroupEntry {
-					binding: 1,
-					resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
-				},
-				wgpu::BindGroupEntry {
-					binding: 2,
-					resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
-				},
-				wgpu::BindGroupEntry {
-					binding: 3,
-					resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
-				},
-			],
+		let key = (albedo, emissive, bump);
+		let mut tex_bgs = self.texture_bind_groups.borrow_mut();
+		let tex_bg = tex_bgs.entry(key).or_insert_with(|| {
+			self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+				label: Some("inox2d_texture_set"),
+				layout: &self.texture_layout,
+				entries: &[
+					wgpu::BindGroupEntry {
+						binding: 0,
+						resource: wgpu::BindingResource::Sampler(&self.sampler),
+					},
+					wgpu::BindGroupEntry {
+						binding: 1,
+						resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
+					},
+					wgpu::BindGroupEntry {
+						binding: 2,
+						resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
+					},
+					wgpu::BindGroupEntry {
+						binding: 3,
+						resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
+					},
+				],
+			})
 		});
-		pass.set_bind_group(1, &tex_bg, &[]);
+		pass.set_bind_group(1, &*tex_bg, &[]);
 		let start = render_ctx.index_offset as u32;
 		let end = start + render_ctx.index_len as u32;
 		tracing::debug!(
