@@ -6,10 +6,10 @@ description = "WGPU renderer for Inox2D"
 
 [dependencies]
 wgpu = "24"
-thiserror = "1"
-bytemuck = { version = "1", features = ["derive"] }
-tracing = "0.1"
-include-wgsl-oil = "0.2"
+thiserror = "2"
+bytemuck = { version = "1.23", features = ["derive"] }
+tracing = "0.1.41"
+include-wgsl-oil = "0.2.9"
 
 inox2d = { path = "../inox2d" }
 
