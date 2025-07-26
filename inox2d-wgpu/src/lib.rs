@@ -94,13 +94,13 @@ pub struct WgpuRenderer {
 	composite_texture: RefCell<Option<wgpu::Texture>>,
 	composite_view: RefCell<Option<wgpu::TextureView>>,
 	composite_bg: RefCell<Option<wgpu::BindGroup>>,
-	prev_target_view: Cell<*const wgpu::TextureView>,
+	prev_target_view: RefCell<Option<wgpu::TextureView>>,
 	stencil_texture: wgpu::Texture,
 	stencil_view: wgpu::TextureView,
 	offscreen_texture: wgpu::Texture,
 	offscreen_view: wgpu::TextureView,
 	using_offscreen: Cell<bool>,
-	target_view: Cell<*const wgpu::TextureView>,
+	target_view: RefCell<Option<wgpu::TextureView>>,
 	output_format: wgpu::TextureFormat,
 	pub camera: Camera,
 	pub viewport: UVec2,
@@ -678,13 +678,13 @@ impl WgpuRenderer {
 			composite_texture: RefCell::new(None),
 			composite_view: RefCell::new(None),
 			composite_bg: RefCell::new(None),
-			prev_target_view: Cell::new(core::ptr::null()),
+			prev_target_view: RefCell::new(None),
 			stencil_texture,
 			stencil_view,
 			offscreen_texture,
 			offscreen_view,
 			using_offscreen: Cell::new(true),
-			target_view: Cell::new(core::ptr::null()),
+			target_view: RefCell::new(None),
 			output_format,
 			camera: Camera::default(),
 			viewport: UVec2::ZERO,
@@ -698,7 +698,7 @@ impl WgpuRenderer {
 			encoder: RefCell::new(None),
 			render_pass: RefCell::new(None),
 		};
-		renderer.target_view.set(&renderer.offscreen_view as *const _);
+		*renderer.target_view.borrow_mut() = Some(renderer.offscreen_view.clone());
 		Ok(renderer)
 	}
 
@@ -742,19 +742,19 @@ impl WgpuRenderer {
 			.offscreen_texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
 
-		if self.using_offscreen.get() || self.target_view.get().is_null() {
-			self.target_view.set(&self.offscreen_view as *const _);
+		if self.using_offscreen.get() || self.target_view.borrow().is_none() {
+			*self.target_view.borrow_mut() = Some(self.offscreen_view.clone());
 			self.using_offscreen.set(true);
 		}
 	}
 
 	pub fn set_target_view(&self, view: &wgpu::TextureView) {
-		self.target_view.set(view as *const _);
+		*self.target_view.borrow_mut() = Some(view.clone());
 		self.using_offscreen.set(false);
 	}
 
-	pub fn target_view(&self) -> &wgpu::TextureView {
-		unsafe { &*self.target_view.get() }
+	pub fn target_view(&self) -> std::cell::Ref<'_, wgpu::TextureView> {
+		std::cell::Ref::map(self.target_view.borrow(), |v| v.as_ref().expect("target view not set"))
 	}
 
 	pub fn copy_target_to_buffer(
@@ -788,10 +788,11 @@ impl WgpuRenderer {
 	}
 
 	pub fn clear(&self, encoder: &mut wgpu::CommandEncoder) {
+		let tv = self.target_view();
 		encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 			label: Some("inox2d_clear"),
 			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view: unsafe { &*self.target_view.get() },
+				view: &*tv,
 				resolve_target: None,
 				ops: wgpu::Operations {
 					load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -818,10 +819,11 @@ impl WgpuRenderer {
 			label: Some("inox2d_frame"),
 		}));
 
+		let tv = self.target_view();
 		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 			label: Some("inox2d_frame"),
 			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view: unsafe { &*self.target_view.get() },
+				view: &*tv,
 				resolve_target: None,
 				ops: wgpu::Operations {
 					load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -873,10 +875,11 @@ impl WgpuRenderer {
 			label: Some("inox2d_debug_rect"),
 		});
 		{
+			let tv = self.target_view();
 			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("inox2d_debug_rect"),
 				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: unsafe { &*self.target_view.get() },
+					view: &*tv,
 					resolve_target: None,
 					ops: wgpu::Operations {
 						load: wgpu::LoadOp::Load,
@@ -922,10 +925,12 @@ impl InoxRenderer for WgpuRenderer {
 			occlusion_query_set: None,
 		});
 
+		let tv = self.target_view();
+
 		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 			label: Some("inox2d_pass"),
 			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view: unsafe { &*self.target_view.get() },
+				view: &*tv,
 				resolve_target: None,
 				ops: wgpu::Operations {
 					load: wgpu::LoadOp::Load,
@@ -1096,11 +1101,10 @@ impl InoxRenderer for WgpuRenderer {
 			],
 		});
 		*self.composite_texture.borrow_mut() = Some(texture);
-		*self.composite_view.borrow_mut() = Some(view);
+		*self.composite_view.borrow_mut() = Some(view.clone());
 		*self.composite_bg.borrow_mut() = Some(bg);
-		self.prev_target_view.set(self.target_view.get());
-		self.target_view
-			.set(self.composite_view.borrow().as_ref().unwrap() as *const _);
+		*self.prev_target_view.borrow_mut() = self.target_view.borrow().clone();
+		*self.target_view.borrow_mut() = Some(view);
 		self.render_pass.borrow_mut().take();
 		let mut enc_ref = self.encoder.borrow_mut();
 		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
@@ -1143,56 +1147,57 @@ impl InoxRenderer for WgpuRenderer {
 			Some(b) => b,
 			None => return,
 		};
-		let prev = self.prev_target_view.get();
-		self.target_view.set(prev);
+		if let Some(prev_view) = self.prev_target_view.borrow_mut().take() {
+			*self.target_view.borrow_mut() = Some(prev_view.clone());
 
-		let arr = components.transform.to_cols_array();
-		self.queue
-			.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
-		let zero = [0.0f32, 0.0f32, 0.0f32, 0.0f32];
-		self.queue
-			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
+			let arr = components.transform.to_cols_array();
+			self.queue
+				.write_buffer(&self.transform_buf, 0, bytemuck::cast_slice(&arr));
+			let zero = [0.0f32, 0.0f32, 0.0f32, 0.0f32];
+			self.queue
+				.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
 
-		self.render_pass.borrow_mut().take();
-		let mut enc_ref = self.encoder.borrow_mut();
-		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
-		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-			label: Some("inox2d_composite_blend"),
-			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-				view: unsafe { &*prev },
-				resolve_target: None,
-				ops: wgpu::Operations {
-					load: wgpu::LoadOp::Load,
-					store: wgpu::StoreOp::Store,
-				},
-			})],
-			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-				view: &self.stencil_view,
-				depth_ops: None,
-				stencil_ops: Some(wgpu::Operations {
-					load: wgpu::LoadOp::Load,
-					store: wgpu::StoreOp::Store,
+			self.render_pass.borrow_mut().take();
+			let mut enc_ref = self.encoder.borrow_mut();
+			let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
+			let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("inox2d_composite_blend"),
+				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+					view: &prev_view,
+					resolve_target: None,
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Load,
+						store: wgpu::StoreOp::Store,
+					},
+				})],
+				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+					view: &self.stencil_view,
+					depth_ops: None,
+					stencil_ops: Some(wgpu::Operations {
+						load: wgpu::LoadOp::Load,
+						store: wgpu::StoreOp::Store,
+					}),
 				}),
-			}),
-			timestamp_writes: None,
-			occlusion_query_set: None,
-		});
+				timestamp_writes: None,
+				occlusion_query_set: None,
+			});
 
-		let mut pass_ref = self.render_pass.borrow_mut();
-		let pass =
-			pass_ref.insert(unsafe { std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(pass) });
-		pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
-		pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-		pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-		pass.set_bind_group(0, &self.camera_bg, &[]);
-		pass.set_bind_group(1, &bg, &[]);
-		pass.set_bind_group(2, &self.frag_bg, &[]);
-		pass.set_bind_group(3, &self.transform_bg, &[]);
-		pass.set_bind_group(4, &self.origin_bg, &[]);
-		pass.draw_indexed(0..6, 0, 0..1);
+			let mut pass_ref = self.render_pass.borrow_mut();
+			let pass = pass_ref
+				.insert(unsafe { std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(pass) });
+			pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
+			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+			pass.set_bind_group(0, &self.camera_bg, &[]);
+			pass.set_bind_group(1, &bg, &[]);
+			pass.set_bind_group(2, &self.frag_bg, &[]);
+			pass.set_bind_group(3, &self.transform_bg, &[]);
+			pass.set_bind_group(4, &self.origin_bg, &[]);
+			pass.draw_indexed(0..6, 0, 0..1);
 
-		*self.composite_texture.borrow_mut() = None;
-		*self.composite_view.borrow_mut() = None;
-		*self.composite_bg.borrow_mut() = None;
+			*self.composite_texture.borrow_mut() = None;
+			*self.composite_view.borrow_mut() = None;
+			*self.composite_bg.borrow_mut() = None;
+		}
 	}
 }
