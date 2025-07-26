@@ -20,6 +20,9 @@ features = ["serde"]
 
 [dev-dependencies]
 pollster = "0.4"
+image = "0.25"
+json = "0.12"
+futures = "0.3"
 
 [features]
 headless = ["winit"]
