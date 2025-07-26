@@ -14,9 +14,9 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
-mod shaders;
 #[cfg(feature = "headless")]
 pub mod headless;
+mod shaders;
 
 fn align_to(value: u32, alignment: u32) -> u32 {
 	let remainder = value % alignment;
@@ -112,6 +112,7 @@ pub struct WgpuRenderer {
 	debug_index_buffer: wgpu::Buffer,
 	debug_pipeline: wgpu::RenderPipeline,
 	encoder: RefCell<Option<wgpu::CommandEncoder>>,
+	render_pass: RefCell<Option<wgpu::RenderPass<'static>>>,
 }
 
 // WgpuRenderer interacts exclusively with the render thread. The underlying
@@ -542,18 +543,18 @@ impl WgpuRenderer {
 				depth_write_enabled: false,
 				depth_compare: wgpu::CompareFunction::Always,
 				stencil: wgpu::StencilState {
-                                        front: wgpu::StencilFaceState {
-                                                compare: wgpu::CompareFunction::Always,
-                                                fail_op: wgpu::StencilOperation::Keep,
-                                                depth_fail_op: wgpu::StencilOperation::Keep,
-                                                pass_op: wgpu::StencilOperation::Replace,
-                                        },
-                                        back: wgpu::StencilFaceState {
-                                                compare: wgpu::CompareFunction::Always,
-                                                fail_op: wgpu::StencilOperation::Keep,
-                                                depth_fail_op: wgpu::StencilOperation::Keep,
-                                                pass_op: wgpu::StencilOperation::Replace,
-                                        },
+					front: wgpu::StencilFaceState {
+						compare: wgpu::CompareFunction::Always,
+						fail_op: wgpu::StencilOperation::Keep,
+						depth_fail_op: wgpu::StencilOperation::Keep,
+						pass_op: wgpu::StencilOperation::Replace,
+					},
+					back: wgpu::StencilFaceState {
+						compare: wgpu::CompareFunction::Always,
+						fail_op: wgpu::StencilOperation::Keep,
+						depth_fail_op: wgpu::StencilOperation::Keep,
+						pass_op: wgpu::StencilOperation::Replace,
+					},
 					read_mask: 0xff,
 					write_mask: 0xff,
 				},
@@ -695,6 +696,7 @@ impl WgpuRenderer {
 			debug_index_buffer,
 			debug_pipeline,
 			encoder: RefCell::new(None),
+			render_pass: RefCell::new(None),
 		};
 		renderer.target_view.set(&renderer.offscreen_view as *const _);
 		Ok(renderer)
@@ -811,10 +813,35 @@ impl WgpuRenderer {
 
 	pub fn on_begin_draw(&self, puppet: &Puppet) {
 		tracing::debug!("Begin draw");
-		let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+		let mut enc_ref = self.encoder.borrow_mut();
+		let encoder = enc_ref.insert(self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 			label: Some("inox2d_frame"),
+		}));
+
+		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			label: Some("inox2d_frame"),
+			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+				view: unsafe { &*self.target_view.get() },
+				resolve_target: None,
+				ops: wgpu::Operations {
+					load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+					store: wgpu::StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.stencil_view,
+				depth_ops: None,
+				stencil_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Clear(1),
+					store: wgpu::StoreOp::Store,
+				}),
+			}),
+			timestamp_writes: None,
+			occlusion_query_set: None,
 		});
-		self.clear(&mut encoder);
+		*self.render_pass.borrow_mut() =
+			Some(unsafe { std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(pass) });
+
 		let mvp = self.camera.matrix(self.viewport.as_vec2());
 		let arr = mvp.to_cols_array();
 		self.queue.write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&arr));
@@ -832,11 +859,10 @@ impl WgpuRenderer {
 		}
 		self.queue
 			.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
-
-		*self.encoder.borrow_mut() = Some(encoder);
 	}
 	pub fn on_end_draw(&self, _puppet: &Puppet) {
 		tracing::debug!("End draw");
+		self.render_pass.borrow_mut().take();
 		if let Some(encoder) = self.encoder.borrow_mut().take() {
 			self.queue.submit(Some(encoder.finish()));
 		}
@@ -877,24 +903,48 @@ impl InoxRenderer for WgpuRenderer {
 		self.queue
 			.write_buffer(&self.mask_buf, 0, bytemuck::bytes_of(&threshold));
 
+		self.render_pass.borrow_mut().take();
 		let mut enc_ref = self.encoder.borrow_mut();
 		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
-		{
-			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_clear_stencil"),
-				color_attachments: &[],
-				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-					view: &self.stencil_view,
-					depth_ops: None,
-					stencil_ops: Some(wgpu::Operations {
-						load: wgpu::LoadOp::Clear(clear_val),
-						store: wgpu::StoreOp::Store,
-					}),
+
+		encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			label: Some("inox2d_clear_stencil"),
+			color_attachments: &[],
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.stencil_view,
+				depth_ops: None,
+				stencil_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Clear(clear_val),
+					store: wgpu::StoreOp::Store,
 				}),
-				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-		}
+			}),
+			timestamp_writes: None,
+			occlusion_query_set: None,
+		});
+
+		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			label: Some("inox2d_pass"),
+			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+				view: unsafe { &*self.target_view.get() },
+				resolve_target: None,
+				ops: wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.stencil_view,
+				depth_ops: None,
+				stencil_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
+				}),
+			}),
+			timestamp_writes: None,
+			occlusion_query_set: None,
+		});
+		*self.render_pass.borrow_mut() =
+			Some(unsafe { std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(pass) });
 	}
 	fn on_begin_mask(&self, mask: &Mask) {
 		let val = if mask.mode == MaskMode::Mask { 1 } else { 0 };
@@ -932,95 +982,72 @@ impl InoxRenderer for WgpuRenderer {
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&origin_arr));
 
-		let mut enc_ref = self.encoder.borrow_mut();
-		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
-		{
-			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_pass"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: unsafe { &*self.target_view.get() },
-					resolve_target: None,
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Load,
-						store: wgpu::StoreOp::Store,
-					},
-				})],
-				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-					view: &self.stencil_view,
-					depth_ops: None,
-					stencil_ops: Some(wgpu::Operations {
-						load: wgpu::LoadOp::Load,
-						store: wgpu::StoreOp::Store,
-					}),
-				}),
-				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-			if as_mask {
-				pass.set_pipeline(&self.mask_pipeline);
-				pass.set_bind_group(2, &self.mask_bg, &[]);
-			} else {
-				let idx = self.blend_mode as usize;
-				pass.set_pipeline(&self.pipelines[idx]);
-				let blend = &components.drawable.blending;
-				let tint = blend.tint * self.tint;
-				let data = [
-					tint.x,
-					tint.y,
-					tint.z,
-					1.0,
-					blend.screen_tint.x,
-					blend.screen_tint.y,
-					blend.screen_tint.z,
-					1.0,
-					blend.opacity,
-					self.emission_strength,
-					0.0,
-					0.0,
-				];
-				self.queue.write_buffer(&self.frag_buf, 0, bytemuck::cast_slice(&data));
-				pass.set_bind_group(2, &self.frag_bg, &[]);
-			}
-			pass.set_stencil_reference(self.stencil_ref.get());
-			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-			pass.set_bind_group(0, &self.camera_bg, &[]);
-			pass.set_bind_group(3, &self.transform_bg, &[]);
-			pass.set_bind_group(4, &self.origin_bg, &[]);
-			let albedo = components.texture.tex_albedo.raw();
-			let emissive = components.texture.tex_emissive.raw();
-			let bump = components.texture.tex_bumpmap.raw();
-			let tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-				label: Some("inox2d_texture_set"),
-				layout: &self.texture_layout,
-				entries: &[
-					wgpu::BindGroupEntry {
-						binding: 0,
-						resource: wgpu::BindingResource::Sampler(&self.sampler),
-					},
-					wgpu::BindGroupEntry {
-						binding: 1,
-						resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
-					},
-					wgpu::BindGroupEntry {
-						binding: 2,
-						resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
-					},
-					wgpu::BindGroupEntry {
-						binding: 3,
-						resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
-					},
-				],
-			});
-			pass.set_bind_group(1, &tex_bg, &[]);
-			let start = render_ctx.index_offset as u32;
-			let end = start + render_ctx.index_len as u32;
-			tracing::debug!(
-				"draw_indexed range: {start:?}..{end:?}, stencil_ref: {}",
-				self.stencil_ref.get()
-			);
-			pass.draw_indexed(start..end, 0, 0..1);
+		let mut pass_ref = self.render_pass.borrow_mut();
+		let pass = pass_ref.as_mut().expect("on_begin_draw not called");
+		if as_mask {
+			pass.set_pipeline(&self.mask_pipeline);
+			pass.set_bind_group(2, &self.mask_bg, &[]);
+		} else {
+			let idx = self.blend_mode as usize;
+			pass.set_pipeline(&self.pipelines[idx]);
+			let blend = &components.drawable.blending;
+			let tint = blend.tint * self.tint;
+			let data = [
+				tint.x,
+				tint.y,
+				tint.z,
+				1.0,
+				blend.screen_tint.x,
+				blend.screen_tint.y,
+				blend.screen_tint.z,
+				1.0,
+				blend.opacity,
+				self.emission_strength,
+				0.0,
+				0.0,
+			];
+			self.queue.write_buffer(&self.frag_buf, 0, bytemuck::cast_slice(&data));
+			pass.set_bind_group(2, &self.frag_bg, &[]);
 		}
+		pass.set_stencil_reference(self.stencil_ref.get());
+		pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+		pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+		pass.set_bind_group(0, &self.camera_bg, &[]);
+		pass.set_bind_group(3, &self.transform_bg, &[]);
+		pass.set_bind_group(4, &self.origin_bg, &[]);
+		let albedo = components.texture.tex_albedo.raw();
+		let emissive = components.texture.tex_emissive.raw();
+		let bump = components.texture.tex_bumpmap.raw();
+		let tex_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+			label: Some("inox2d_texture_set"),
+			layout: &self.texture_layout,
+			entries: &[
+				wgpu::BindGroupEntry {
+					binding: 0,
+					resource: wgpu::BindingResource::Sampler(&self.sampler),
+				},
+				wgpu::BindGroupEntry {
+					binding: 1,
+					resource: wgpu::BindingResource::TextureView(&self.texture_views[albedo]),
+				},
+				wgpu::BindGroupEntry {
+					binding: 2,
+					resource: wgpu::BindingResource::TextureView(&self.texture_views[emissive]),
+				},
+				wgpu::BindGroupEntry {
+					binding: 3,
+					resource: wgpu::BindingResource::TextureView(&self.texture_views[bump]),
+				},
+			],
+		});
+		pass.set_bind_group(1, &tex_bg, &[]);
+		let start = render_ctx.index_offset as u32;
+		let end = start + render_ctx.index_len as u32;
+		tracing::debug!(
+			"draw_indexed range: {start:?}..{end:?}, stencil_ref: {}",
+			self.stencil_ref.get()
+		);
+		pass.draw_indexed(start..end, 0, 0..1);
 	}
 
 	fn begin_composite_content(
@@ -1074,32 +1101,32 @@ impl InoxRenderer for WgpuRenderer {
 		self.prev_target_view.set(self.target_view.get());
 		self.target_view
 			.set(self.composite_view.borrow().as_ref().unwrap() as *const _);
-
+		self.render_pass.borrow_mut().take();
 		let mut enc_ref = self.encoder.borrow_mut();
 		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
-		{
-			encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_clear_composite"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: self.composite_view.borrow().as_ref().unwrap(),
-					resolve_target: None,
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-						store: wgpu::StoreOp::Store,
-					},
-				})],
-				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-					view: &self.stencil_view,
-					depth_ops: None,
-					stencil_ops: Some(wgpu::Operations {
-						load: wgpu::LoadOp::Load,
-						store: wgpu::StoreOp::Store,
-					}),
+		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			label: Some("inox2d_clear_composite"),
+			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+				view: self.composite_view.borrow().as_ref().unwrap(),
+				resolve_target: None,
+				ops: wgpu::Operations {
+					load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+					store: wgpu::StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.stencil_view,
+				depth_ops: None,
+				stencil_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
 				}),
-				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-		}
+			}),
+			timestamp_writes: None,
+			occlusion_query_set: None,
+		});
+		*self.render_pass.borrow_mut() =
+			Some(unsafe { std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(pass) });
 	}
 
 	fn finish_composite_content(
@@ -1126,40 +1153,43 @@ impl InoxRenderer for WgpuRenderer {
 		self.queue
 			.write_buffer(&self.origin_buf, 0, bytemuck::cast_slice(&zero));
 
+		self.render_pass.borrow_mut().take();
 		let mut enc_ref = self.encoder.borrow_mut();
 		let encoder = enc_ref.as_mut().expect("on_begin_draw not called");
-		{
-			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("inox2d_composite_blend"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: unsafe { &*prev },
-					resolve_target: None,
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Load,
-						store: wgpu::StoreOp::Store,
-					},
-				})],
-				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-					view: &self.stencil_view,
-					depth_ops: None,
-					stencil_ops: Some(wgpu::Operations {
-						load: wgpu::LoadOp::Load,
-						store: wgpu::StoreOp::Store,
-					}),
+		let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+			label: Some("inox2d_composite_blend"),
+			color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+				view: unsafe { &*prev },
+				resolve_target: None,
+				ops: wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
+				},
+			})],
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &self.stencil_view,
+				depth_ops: None,
+				stencil_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Load,
+					store: wgpu::StoreOp::Store,
 				}),
-				timestamp_writes: None,
-				occlusion_query_set: None,
-			});
-			pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
-			pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-			pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-			pass.set_bind_group(0, &self.camera_bg, &[]);
-			pass.set_bind_group(1, &bg, &[]);
-			pass.set_bind_group(2, &self.frag_bg, &[]);
-			pass.set_bind_group(3, &self.transform_bg, &[]);
-			pass.set_bind_group(4, &self.origin_bg, &[]);
-			pass.draw_indexed(0..6, 0, 0..1);
-		}
+			}),
+			timestamp_writes: None,
+			occlusion_query_set: None,
+		});
+
+		let mut pass_ref = self.render_pass.borrow_mut();
+		let pass =
+			pass_ref.insert(unsafe { std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(pass) });
+		pass.set_pipeline(&self.pipelines[BlendMode::Normal as usize]);
+		pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+		pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+		pass.set_bind_group(0, &self.camera_bg, &[]);
+		pass.set_bind_group(1, &bg, &[]);
+		pass.set_bind_group(2, &self.frag_bg, &[]);
+		pass.set_bind_group(3, &self.transform_bg, &[]);
+		pass.set_bind_group(4, &self.origin_bg, &[]);
+		pass.draw_indexed(0..6, 0, 0..1);
 
 		*self.composite_texture.borrow_mut() = None;
 		*self.composite_view.borrow_mut() = None;
