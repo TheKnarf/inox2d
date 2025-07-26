@@ -15,6 +15,8 @@ use wgpu::util::DeviceExt;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 mod shaders;
+#[cfg(feature = "headless")]
+pub mod headless;
 
 fn align_to(value: u32, alignment: u32) -> u32 {
 	let remainder = value % alignment;
