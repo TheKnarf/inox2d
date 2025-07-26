@@ -10,9 +10,16 @@ thiserror = "2"
 bytemuck = { version = "1.23", features = ["derive"] }
 tracing = "0.1.41"
 include-wgsl-oil = "0.2.9"
+winit = { version = "0.29", optional = true }
 
 inox2d = { path = "../inox2d" }
 
 [dependencies.glam]
 version = "0.29"
 features = ["serde"]
+
+[dev-dependencies]
+pollster = "0.4"
+
+[features]
+headless = ["winit"]
